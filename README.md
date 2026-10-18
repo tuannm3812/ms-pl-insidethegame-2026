@@ -37,7 +37,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ```bash
 pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
-python -m pytest -q               # 10 tests
+python -m pytest -q               # 11 tests
 python -m halftime.mcp_server     # MCP server over stdio
 ```
 
@@ -73,6 +73,6 @@ Without the two `FOUNDRY_*` variables, the deployed app still works using the ru
 ## Status and limits
 
 - Tested offline: rule-based agents, the API, the page at desktop and phone width, and the Agent Framework wiring (using a scripted stand-in model).
-- The Foundry path has **not** yet been run against a live endpoint.
+- Tested live on Microsoft Foundry (gpt-4.1-mini, key-based Azure OpenAI endpoint): the tactics, explainer and coach agents all returned valid replies, about 15 s of model time per briefing.
 - Offline fan mode writes English only. Other languages need a model.
 - The synthetic data has more turnovers than a real match, which makes PPDA run low. The demo match is seed 27: the home side leads 1-0, but the away side switches to a high press at 25' and takes over.
