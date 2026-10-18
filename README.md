@@ -35,7 +35,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ## Run it
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
 python -m pytest -q               # 10 tests
 python -m halftime.mcp_server     # MCP server over stdio
@@ -47,6 +47,28 @@ Optional, to use Foundry (sign in with `az login` first):
 export FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<name>
 export FOUNDRY_MODEL=<deployment-name>
 ```
+
+## Deploy to Azure Container Apps
+
+The app ships as one container (`Dockerfile`). CI builds it and smoke-tests it on every pull request.
+
+```bash
+az login
+az group create -n rg-insidethegame -l eastus
+az containerapp up -n halftime-briefing -g rg-insidethegame -l eastus \
+  --source . --ingress external --target-port 8000 \
+  --env-vars FOUNDRY_PROJECT_ENDPOINT=<endpoint> FOUNDRY_MODEL=<deployment>
+```
+
+The app signs in to Foundry with `DefaultAzureCredential`, so in Azure it uses the container app's managed identity. No keys are stored. Give that identity access to the Foundry project:
+
+```bash
+az containerapp identity assign -n halftime-briefing -g rg-insidethegame --system-assigned
+az role assignment create --assignee <principalId from the previous command> \
+  --role "Azure AI User" --scope <Foundry project resource id>
+```
+
+Without the two `FOUNDRY_*` variables, the deployed app still works using the rule-based agents.
 
 ## Status and limits
 
