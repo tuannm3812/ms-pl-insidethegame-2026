@@ -2,11 +2,14 @@
 
 Five roles, run in order:
 
-  1. Stats agent      computes every number (deterministic code, also served over MCP)
+  1. Stats agent      computes every number (deterministic code, also
+                      served over MCP)
   2. Tactics agent    finds the three patterns that decided the half
-  3. Explainer agent  says why each pattern matters (control vs chaos, pressure, rhythm)
-  4. Coach agent      turns them into three second-half changes   (analyst mode)
-     Fan agent        turns them into a story about your team/player (fan mode)
+  3. Explainer agent  says why each pattern matters (control vs chaos,
+                      pressure, rhythm)
+  4. Coach agent      turns them into three second-half changes (analyst mode)
+     Fan agent        turns them into a story about your team/player
+                      (fan mode)
   5. Overlay agent    renders timed, machine-readable graphics cards
 
 Steps 2-4 run on Microsoft Agent Framework when a model is configured
@@ -21,10 +24,14 @@ import json
 import os
 import re
 import time
-from typing import Annotated, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Annotated, Any
 
 from . import metrics
 from .metrics import SIDES, other
+
+if TYPE_CHECKING:
+    from agent_framework import BaseChatClient, FunctionTool
 
 # ---------------------------------------------------------------------------
 # Model client
@@ -50,12 +57,12 @@ def load_env_file(path: str = ".env") -> None:
 
 
 def azure_resource_endpoint(url: str) -> str:
-    """Accept any Foundry/Azure OpenAI URL a portal shows and return the resource root."""
+    """Return the resource root of any Foundry/Azure OpenAI portal URL."""
     m = re.match(r"(https://[^/]+)", url.strip())
     return m.group(1) + "/" if m else url
 
 
-def make_client():
+def make_client() -> BaseChatClient | None:
     """Pick a chat client from the environment, or None for offline mode."""
     load_env_file()
     if os.getenv("FOUNDRY_PROJECT_ENDPOINT") and os.getenv("FOUNDRY_MODEL"):
@@ -63,24 +70,32 @@ def make_client():
         from azure.identity import DefaultAzureCredential
 
         return FoundryChatClient(credential=DefaultAzureCredential())
-    if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"):
-        # Key-based access to a model deployed in Foundry (Azure OpenAI v1 API).
+    if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv(
+        "AZURE_OPENAI_API_KEY"
+    ):
+        # Key-based access to a model deployed in Foundry (Azure OpenAI v1).
         from agent_framework.openai import OpenAIChatClient
 
         return OpenAIChatClient(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            azure_endpoint=azure_resource_endpoint(os.environ["AZURE_OPENAI_ENDPOINT"]),
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            azure_endpoint=azure_resource_endpoint(
+                os.environ["AZURE_OPENAI_ENDPOINT"]
+            ),
             api_key=os.environ["AZURE_OPENAI_API_KEY"],
         )
     if os.getenv("OPENAI_API_KEY"):
         from agent_framework.openai import OpenAIChatClient
 
-        return OpenAIChatClient(model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-                                api_key=os.environ["OPENAI_API_KEY"])
+        return OpenAIChatClient(
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            api_key=os.environ["OPENAI_API_KEY"],
+        )
     return None
 
 
-def backend_name(client) -> str:
+def backend_name(client: BaseChatClient | None) -> str:
+    """Short label for the active backend, shown in the page header."""
     return "offline-rules" if client is None else type(client).__name__
 
 
@@ -89,7 +104,8 @@ def backend_name(client) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_tools(match: dict):
+def build_tools(match: dict) -> list[FunctionTool]:
+    """Wrap the metric functions as Agent Framework tools for one match."""
     from agent_framework import tool
 
     events = metrics.window(match["events"])
@@ -100,13 +116,30 @@ def build_tools(match: dict):
         for s in SIDES:
             if t in (s, names[s].lower(), match["teams"][s]["short"].lower()):
                 return s
-        raise ValueError(f"unknown team {team!r}; use one of {list(names.values())}")
+        raise ValueError(
+            f"unknown team {team!r}; use one of {list(names.values())}"
+        )
 
-    @tool(description="Team stats (possession, xG, xT, PPDA, turnovers) between two minutes of the first half.")
-    def team_stats(team: Annotated[str, "team name, short code, or home/away"],
-                   from_minute: Annotated[int, "start minute, inclusive"] = 0,
-                   to_minute: Annotated[int, "end minute, exclusive; 45 includes stoppage time"] = 45) -> str:
-        evs = [e for e in events if from_minute <= e["minute"] < (99 if to_minute >= 45 else to_minute)]
+    @tool(
+        description=(
+            "Team stats (possession, xG, xT, PPDA, turnovers) between two "
+            "minutes of the first half."
+        )
+    )
+    def team_stats(
+        team: Annotated[str, "team name, short code, or home/away"],
+        from_minute: Annotated[int, "start minute, inclusive"] = 0,
+        to_minute: Annotated[
+            int, "end minute, exclusive; 45 includes stoppage time"
+        ] = 45,
+    ) -> str:
+        evs = [
+            e
+            for e in events
+            if from_minute
+            <= e["minute"]
+            < (99 if to_minute >= 45 else to_minute)
+        ]
         return json.dumps(metrics.team_summary(evs, _side(team)))
 
     @tool(description="First-half stats for one player by surname.")
@@ -116,21 +149,39 @@ def build_tools(match: dict):
                 return json.dumps(p)
         return json.dumps({"error": f"no player called {player}"})
 
-    @tool(description="Where a team's threat (xT) came from by channel, optionally only after a minute.")
-    def threat_channels(team: Annotated[str, "team name or home/away"],
-                        from_minute: Annotated[int, "only count passes from this minute"] = 0) -> str:
+    @tool(
+        description=(
+            "Where a team's threat (xT) came from by channel, optionally "
+            "only after a minute."
+        )
+    )
+    def threat_channels(
+        team: Annotated[str, "team name or home/away"],
+        from_minute: Annotated[int, "only count passes from this minute"] = 0,
+    ) -> str:
         evs = [e for e in events if e["minute"] >= from_minute]
         return json.dumps(metrics.threat_channels(evs, _side(team)))
 
     return [team_stats, player_stats, threat_channels]
 
 
-async def _run_agent(client, name: str, instructions: str, payload: dict, tools=None) -> Any:
+async def _run_agent(
+    client: BaseChatClient,
+    name: str,
+    instructions: str,
+    payload: dict,
+    tools: list[FunctionTool] | None = None,
+) -> Any:
     """Run one Agent Framework agent and parse the JSON it returns."""
     from agent_framework import Agent
 
-    agent = Agent(client, instructions=instructions + "\n\nReply with JSON only, no prose around it.",
-                  name=name, tools=tools)
+    agent = Agent(
+        client,
+        instructions=instructions
+        + "\n\nReply with JSON only, no prose around it.",
+        name=name,
+        tools=tools,
+    )
     resp = await agent.run(json.dumps(payload, default=str))
     text = resp.text.strip()
     m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
@@ -153,200 +204,386 @@ def _per_10(n: float, minutes: float) -> float:
 
 
 def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
+    """Rule-based tactics agent: the three findings that decided the half."""
     tp = facts["turning_point"]
     t = tp["minute"]
     b, a = tp["before"], tp["after"]
     names = facts["teams"]
-    after_events = [e for e in metrics.window(match["events"]) if e["minute"] >= t]
+    after_events = [
+        e for e in metrics.window(match["events"]) if e["minute"] >= t
+    ]
     findings = []
 
     # 1. Pressing shift.
-    presser = max(SIDES, key=lambda s: a[s]["high_presses_per_min"] - b[s]["high_presses_per_min"])
+    presser = max(
+        SIDES,
+        key=lambda s: (
+            a[s]["high_presses_per_min"] - b[s]["high_presses_per_min"]
+        ),
+    )
     victim = other(presser)
-    findings.append({
-        "id": "press",
-        "concept": "pressure",
-        "team": presser,
-        "title": f"{names[presser]} switched to a high press around {t}'",
-        "evidence": [
-            {"label": f"{names[presser]} high presses per min", "before": b[presser]["high_presses_per_min"],
-             "after": a[presser]["high_presses_per_min"]},
-            {"label": f"{names[victim]} balls lost in own half per min",
-             "before": _per_min(b[victim]["turnovers_in_own_half"], b[victim]["minutes"]),
-             "after": _per_min(a[victim]["turnovers_in_own_half"], a[victim]["minutes"])},
-            {"label": f"{names[victim]} possession %", "before": b[victim]["possession_pct"],
-             "after": a[victim]["possession_pct"]},
-            {"label": f"{names[victim]} threat (xT) per 10 min",
-             "before": _per_10(b[victim]["xt_created"], b[victim]["minutes"]),
-             "after": _per_10(a[victim]["xt_created"], a[victim]["minutes"])},
-        ],
-        "minute": t,
-    })
+    findings.append(
+        {
+            "id": "press",
+            "concept": "pressure",
+            "team": presser,
+            "title": f"{names[presser]} switched to a high press around {t}'",
+            "evidence": [
+                {
+                    "label": f"{names[presser]} high presses per min",
+                    "before": b[presser]["high_presses_per_min"],
+                    "after": a[presser]["high_presses_per_min"],
+                },
+                {
+                    "label": f"{names[victim]} balls lost in own half per min",
+                    "before": _per_min(
+                        b[victim]["turnovers_in_own_half"],
+                        b[victim]["minutes"],
+                    ),
+                    "after": _per_min(
+                        a[victim]["turnovers_in_own_half"],
+                        a[victim]["minutes"],
+                    ),
+                },
+                {
+                    "label": f"{names[victim]} possession %",
+                    "before": b[victim]["possession_pct"],
+                    "after": a[victim]["possession_pct"],
+                },
+                {
+                    "label": f"{names[victim]} threat (xT) per 10 min",
+                    "before": _per_10(
+                        b[victim]["xt_created"], b[victim]["minutes"]
+                    ),
+                    "after": _per_10(
+                        a[victim]["xt_created"], a[victim]["minutes"]
+                    ),
+                },
+            ],
+            "minute": t,
+        }
+    )
 
     # 2. Where the dominant team's threat comes from since the turning point.
     dominant = max(SIDES, key=lambda s: a[s]["xt_created"] + a[s]["xg"])
     channels = metrics.threat_channels(after_events, dominant)
     channel = max(channels, key=channels.get)
     after_players = metrics.player_stats(after_events, match)
-    creators = sorted((p for p in after_players.values() if p["team"] == dominant),
-                      key=lambda p: -p["xt_created"])[:2]
-    findings.append({
-        "id": "threat",
-        "concept": "rhythm",
-        "team": dominant,
-        "title": f"{names[dominant]} are getting in down the {channel} ({channels[channel]:.0f}% of their threat since {t}')",
-        "evidence": [
-            {"label": f"{names[dominant]} xT share by channel since {t}'", "value": channels},
-            {"label": "Main creators (xT since turning point)",
-             "value": {p["name"]: p["xt_created"] for p in creators}},
-            {"label": f"{names[dominant]} xT before vs after", "before": b[dominant]["xt_created"],
-             "after": a[dominant]["xt_created"]},
-        ],
-        "channel": channel,
-        "creators": [p["name"] for p in creators],
-        "minute": t,
-    })
+    creators = sorted(
+        (p for p in after_players.values() if p["team"] == dominant),
+        key=lambda p: -p["xt_created"],
+    )[:2]
+    findings.append(
+        {
+            "id": "threat",
+            "concept": "rhythm",
+            "team": dominant,
+            "title": (
+                f"{names[dominant]} are getting in down the {channel} "
+                f"({channels[channel]:.0f}% of their threat since {t}')"
+            ),
+            "evidence": [
+                {
+                    "label": (
+                        f"{names[dominant]} xT share by channel since {t}'"
+                    ),
+                    "value": channels,
+                },
+                {
+                    "label": "Main creators (xT since turning point)",
+                    "value": {p["name"]: p["xt_created"] for p in creators},
+                },
+                {
+                    "label": f"{names[dominant]} xT before vs after",
+                    "before": b[dominant]["xt_created"],
+                    "after": a[dominant]["xt_created"],
+                },
+            ],
+            "channel": channel,
+            "creators": [p["name"] for p in creators],
+            "minute": t,
+        }
+    )
 
-    # 3. Scoreline vs chance quality, and the focus team's weak link under pressure.
+    # 3. Scoreline vs chance quality, and the focus team's weak link under
+    # pressure.
     s = facts["summary"]
-    losers = sorted((p for p in after_players.values() if p["team"] == focus),
-                    key=lambda p: -p["lost_ball_in_own_half"])
+    losers = sorted(
+        (p for p in after_players.values() if p["team"] == focus),
+        key=lambda p: -p["lost_ball_in_own_half"],
+    )
     weak = losers[0] if losers and losers[0]["lost_ball_in_own_half"] else None
     gap = round(s[focus]["goals"] - s[focus]["xg"], 2)
     opp_gap = round(s[other(focus)]["goals"] - s[other(focus)]["xg"], 2)
-    verdict = ("ahead of their chances" if gap >= 0.4 else "behind their chances" if gap <= -0.4
-               else "about level with their chances")
-    findings.append({
-        "id": "scoreline",
-        "concept": "chance_quality",
-        "team": focus,
-        "title": f"{names[focus]} are {verdict} ({s[focus]['goals']} goal{'' if s[focus]['goals'] == 1 else 's'} "
-                 f"from {s[focus]['xg']} xG)",
-        "evidence": [
-            {"label": f"{names[focus]}", "value": f"{s[focus]['goals']} scored from {s[focus]['xg']} xG"},
-            {"label": f"{names[other(focus)]}",
-             "value": f"{s[other(focus)]['goals']} scored from {s[other(focus)]['xg']} xG"},
-        ] + ([{"label": f"{weak['name']} balls lost in own half since {t}'",
-               "value": weak["lost_ball_in_own_half"]}] if weak else []),
-        "goals_minus_xg": gap,
-        "opp_goals_minus_xg": opp_gap,
-        "weak_link": weak["name"] if weak else None,
-        "minute": t,
-    })
+    verdict = (
+        "ahead of their chances"
+        if gap >= 0.4
+        else "behind their chances"
+        if gap <= -0.4
+        else "about level with their chances"
+    )
+    findings.append(
+        {
+            "id": "scoreline",
+            "concept": "chance_quality",
+            "team": focus,
+            "title": (
+                f"{names[focus]} are {verdict} ({s[focus]['goals']} "
+                f"goal{'' if s[focus]['goals'] == 1 else 's'} "
+                f"from {s[focus]['xg']} xG)"
+            ),
+            "evidence": [
+                {
+                    "label": f"{names[focus]}",
+                    "value": (
+                        f"{s[focus]['goals']} scored from {s[focus]['xg']} xG"
+                    ),
+                },
+                {
+                    "label": f"{names[other(focus)]}",
+                    "value": (
+                        f"{s[other(focus)]['goals']} scored from "
+                        f"{s[other(focus)]['xg']} xG"
+                    ),
+                },
+            ]
+            + (
+                [
+                    {
+                        "label": (
+                            f"{weak['name']} balls lost in own half since {t}'"
+                        ),
+                        "value": weak["lost_ball_in_own_half"],
+                    }
+                ]
+                if weak
+                else []
+            ),
+            "goals_minus_xg": gap,
+            "opp_goals_minus_xg": opp_gap,
+            "weak_link": weak["name"] if weak else None,
+            "minute": t,
+        }
+    )
     return findings
 
 
-def explain_offline(findings: list[dict], facts: dict, focus: str) -> list[dict]:
+def explain_offline(
+    findings: list[dict], facts: dict, focus: str
+) -> list[dict]:
+    """Rule-based explainer agent: why each finding matters."""
     names = facts["teams"]
     tl = facts["timeline"]
     t = facts["turning_point"]["minute"]
-    chaos_before = round(sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t) / max(1, t // 5), 2)
-    chaos_after = round(sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
-                        / max(1, (45 - t) // 5), 2)
+    chaos_before = round(
+        sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t)
+        / max(1, t // 5),
+        2,
+    )
+    chaos_after = round(
+        sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
+        / max(1, (45 - t) // 5),
+        2,
+    )
     out = []
     for f in findings:
         if f["id"] == "press":
             p, v = f["team"], other(f["team"])
             ev = {e["label"]: e for e in f["evidence"]}
             lost = ev[f"{names[v]} balls lost in own half per min"]
-            tempo = ("the game got scrappier" if chaos_after > chaos_before + 0.3
-                     else "the game settled down" if chaos_after < chaos_before - 0.3
-                     else "the overall tempo stayed about the same")
-            why = (f"{names[p]} started hunting the ball in {names[v]}'s half. "
-                   f"{names[v]} went from losing it there {lost['before']} to {lost['after']} times a minute. "
-                   f"Possession changed hands {chaos_before} times a minute before {t}' and {chaos_after} after, "
-                   f"so {tempo}, but the losses moved closer to {names[v]}'s goal. That is why the press "
-                   f"turns into chances rather than just pressure.")
+            tempo = (
+                "the game got scrappier"
+                if chaos_after > chaos_before + 0.3
+                else "the game settled down"
+                if chaos_after < chaos_before - 0.3
+                else "the overall tempo stayed about the same"
+            )
+            why = (
+                f"{names[p]} started hunting the ball in {names[v]}'s half. "
+                f"{names[v]} went from losing it there {lost['before']} to "
+                f"{lost['after']} times a minute. "
+                f"Possession changed hands {chaos_before} times a minute "
+                f"before {t}' and {chaos_after} after, "
+                f"so {tempo}, but the losses moved closer to {names[v]}'s "
+                "goal. That is why the press "
+                f"turns into chances rather than just pressure."
+            )
             concept = "Control vs chaos"
         elif f["id"] == "threat":
-            why = (f"Expected threat (xT) measures how much each pass moves the ball into places goals come from. "
-                   f"Since {t}', most of {names[f['team']]}'s came down the {f['channel']}, mainly through "
-                   f"{' and '.join(f['creators'])}. A repeated route like that is something the other side can "
-                   f"defend against at half-time.")
+            why = (
+                "Expected threat (xT) measures how much each pass moves the "
+                "ball into places goals come from. "
+                f"Since {t}', most of {names[f['team']]}'s came down the "
+                f"{f['channel']}, mainly through "
+                f"{' and '.join(f['creators'])}. A repeated route like that "
+                "is something the other side can "
+                f"defend against at half-time."
+            )
             concept = "Game rhythm"
         else:
             gap = f["goals_minus_xg"]
-            how = ("more than" if gap >= 0.4 else "fewer than" if gap <= -0.4 else "about what")
-            why = (f"xG adds up the quality of every shot. {names[focus]} have scored {how} their chances "
-                   f"deserved (goals minus xG: {gap:+.2f}). ")
+            how = (
+                "more than"
+                if gap >= 0.4
+                else "fewer than"
+                if gap <= -0.4
+                else "about what"
+            )
+            why = (
+                f"xG adds up the quality of every shot. {names[focus]} have "
+                f"scored {how} their chances "
+                f"deserved (goals minus xG: {gap:+.2f}). "
+            )
             if gap >= 0.4:
-                why += "That lead rests partly on finishing that rarely lasts a whole match. "
+                why += (
+                    "That lead rests partly on finishing that rarely lasts "
+                    "a whole match. "
+                )
             elif gap <= -0.4:
                 why += "The chances are there; the finishing has not been. "
             if f.get("weak_link"):
-                why += (f"{f['weak_link']} is where the ball has been lost most often since {t}', "
-                        f"so that is where the opponent will keep aiming.")
+                why += (
+                    f"{f['weak_link']} is where the ball has been lost most "
+                    f"often since {t}', "
+                    f"so that is where the opponent will keep aiming."
+                )
             concept = "Chance quality"
         out.append({"id": f["id"], "concept": concept, "why_it_matters": why})
     return out
 
 
-def coach_offline(findings: list[dict], facts: dict, match: dict, focus: str) -> list[dict]:
+def coach_offline(
+    findings: list[dict], facts: dict, match: dict, focus: str
+) -> list[dict]:
+    """Rule-based coach agent: three second-half changes."""
     names = facts["teams"]
     opp = other(focus)
     squad = {p["position"]: p for p in match["teams"][focus]["players"]}
-    fastest = max((p for p in match["teams"][focus]["players"] if p["position"] in ("RW", "LW", "ST")),
-                  key=lambda p: p["top_speed_kmh"])
+    fastest = max(
+        (
+            p
+            for p in match["teams"][focus]["players"]
+            if p["position"] in ("RW", "LW", "ST")
+        ),
+        key=lambda p: p["top_speed_kmh"],
+    )
     by_id = {f["id"]: f for f in findings}
     changes = []
 
     press = by_id["press"]
     lost = next(e for e in press["evidence"] if "balls lost" in e["label"])
     if press["team"] == opp:
-        changes.append({
-            "finding": "press",
-            "action": (f"Beat the press: drop {squad['DM']['name']} between the centre-backs to make a back three "
-                       f"in build-up, and go longer earlier towards {fastest['name']} "
-                       f"(top speed {fastest['top_speed_kmh']} km/h) to turn their press into space behind."),
-            "watch": f"Balls lost in our half back under {lost['before']} a minute (now {lost['after']}).",
-        })
+        changes.append(
+            {
+                "finding": "press",
+                "action": (
+                    f"Beat the press: drop {squad['DM']['name']} between the "
+                    "centre-backs to make a back three in build-up, and go "
+                    f"longer earlier towards {fastest['name']} "
+                    f"(top speed {fastest['top_speed_kmh']} km/h) to turn "
+                    "their press into space behind."
+                ),
+                "watch": (
+                    f"Balls lost in our half back under {lost['before']} a "
+                    f"minute (now {lost['after']})."
+                ),
+            }
+        )
     else:
-        changes.append({
-            "finding": "press",
-            "action": (f"Keep the high press, it is working, but hold {squad['DM']['name']} deeper so one long ball "
-                       f"does not get them past our front line."),
-            "watch": f"Keep {names[opp]} losing the ball in their half at least {lost['after']} times a minute.",
-        })
+        changes.append(
+            {
+                "finding": "press",
+                "action": (
+                    "Keep the high press, it is working, but hold "
+                    f"{squad['DM']['name']} deeper so one long ball "
+                    f"does not get them past our front line."
+                ),
+                "watch": (
+                    f"Keep {names[opp]} losing the ball in their half at "
+                    f"least {lost['after']} times a minute."
+                ),
+            }
+        )
 
     threat = by_id["threat"]
     if threat["team"] == opp:
         wide = {"right": "LW", "left": "RW", "centre": "CM"}[threat["channel"]]
         helper = squad[wide]["name"]
-        changes.append({
-            "finding": "threat",
-            "action": (f"Close their {threat['channel']} channel: {helper} tracks back and we double up on "
-                       f"{threat['creators'][0]}" + (f" and {threat['creators'][1]}" if len(threat['creators']) > 1 else "")
-                       + "."),
-            "watch": f"Their share of threat down the {threat['channel']} below 40%.",
-        })
+        changes.append(
+            {
+                "finding": "threat",
+                "action": (
+                    f"Close their {threat['channel']} channel: {helper} "
+                    "tracks back and we double up on "
+                    f"{threat['creators'][0]}"
+                    + (
+                        f" and {threat['creators'][1]}"
+                        if len(threat["creators"]) > 1
+                        else ""
+                    )
+                    + "."
+                ),
+                "watch": (
+                    f"Their share of threat down the {threat['channel']} "
+                    "below 40%."
+                ),
+            }
+        )
     else:
-        changes.append({
-            "finding": "threat",
-            "action": (f"Keep overloading the {threat['channel']}: it is where our threat comes from, through "
-                       f"{' and '.join(threat['creators'])}. Expect them to shift cover there, so have the far side ready."),
-            "watch": "Our xT per minute stays at first-half levels.",
-        })
+        changes.append(
+            {
+                "finding": "threat",
+                "action": (
+                    f"Keep overloading the {threat['channel']}: it is where "
+                    "our threat comes from, through "
+                    f"{' and '.join(threat['creators'])}. Expect them to "
+                    "shift cover there, so have the far side ready."
+                ),
+                "watch": "Our xT per minute stays at first-half levels.",
+            }
+        )
 
     score = by_id["scoreline"]
     s = facts["score"]
     leading = s[focus] > s[opp]
-    momentum = [w["momentum"] if focus == "home" else -w["momentum"] for w in facts["timeline"][-3:]]
-    if score.get("weak_link") and score["weak_link"] not in (squad["DM"]["name"],):
-        action = (f"Protect {score['weak_link']}: give them a short option on every touch, or replace them if they "
-                  f"keep being targeted.")
+    momentum = [
+        w["momentum"] if focus == "home" else -w["momentum"]
+        for w in facts["timeline"][-3:]
+    ]
+    if score.get("weak_link") and score["weak_link"] not in (
+        squad["DM"]["name"],
+    ):
+        action = (
+            f"Protect {score['weak_link']}: give them a short option on every "
+            "touch, or replace them if they keep being targeted."
+        )
     else:
-        action = "Get one more runner into the box: our best chances came from close range."
+        action = (
+            "Get one more runner into the box: our best chances came from "
+            "close range."
+        )
     if leading and sum(momentum) < 0:
-        action += " We lead but lost the last 15 minutes, so slow the restarts and keep the ball for longer spells."
-    changes.append({
-        "finding": "scoreline",
-        "action": action,
-        "watch": f"Their xG for the second half under {max(0.3, round(facts['summary'][opp]['xg'] / 2, 1))}.",
-    })
+        action += (
+            " We lead but lost the last 15 minutes, so slow the restarts and "
+            "keep the ball for longer spells."
+        )
+    changes.append(
+        {
+            "finding": "scoreline",
+            "action": action,
+            "watch": (
+                "Their xG for the second half under "
+                f"{max(0.3, round(facts['summary'][opp]['xg'] / 2, 1))}."
+            ),
+        }
+    )
     return changes
 
 
-def fan_offline(findings: list[dict], facts: dict, focus: str, player: str | None) -> dict:
+def fan_offline(
+    findings: list[dict], facts: dict, focus: str, player: str | None
+) -> dict:
+    """Rule-based fan agent: an English half-time story, plain words."""
     names = facts["teams"]
     s = facts["score"]
     opp = other(focus)
@@ -354,67 +591,166 @@ def fan_offline(findings: list[dict], facts: dict, focus: str, player: str | Non
     goals = [m for m in facts["key_moments"] if m["kind"] == "goal"]
     lead = s[focus] - s[opp]
     mood = "lead" if lead > 0 else "trail" if lead < 0 else "are level with"
-    headline = (f"{names[focus]} {mood} {names[opp]} " if lead else f"{names[focus]} level with {names[opp]} ") \
-        + f"{s[focus]}-{s[opp]} at the break"
+    headline = (
+        f"{names[focus]} {mood} {names[opp]} "
+        if lead
+        else f"{names[focus]} level with {names[opp]} "
+    ) + f"{s[focus]}-{s[opp]} at the break"
     if lead < 0:
-        headline = f"{names[focus]} trail {names[opp]} {s[focus]}-{s[opp]} at the break"
-    goal_lines = [f"{m['minute']}' {m['player']} ({names[m['team']]})" for m in goals]
+        headline = (
+            f"{names[focus]} trail {names[opp]} {s[focus]}-{s[opp]} "
+            "at the break"
+        )
+    goal_lines = [
+        f"{m['minute']}' {m['player']} ({names[m['team']]})" for m in goals
+    ]
     press = next(f for f in findings if f["id"] == "press")
     story = [
-        f"Goals: {', '.join(goal_lines)}." if goal_lines else "No goals yet, but plenty happening.",
-        (f"The game changed around the {t}th minute. {names[press['team']]} started pressing high and "
-         f"{'your team' if press['team'] != focus else 'the other side'} kept losing the ball near "
-         f"{'your' if press['team'] != focus else 'their'} own goal."),
+        f"Goals: {', '.join(goal_lines)}."
+        if goal_lines
+        else "No goals yet, but plenty happening.",
+        (
+            f"The game changed around the {t}th minute. "
+            f"{names[press['team']]} started pressing high and "
+            f"{'your team' if press['team'] != focus else 'the other side'} "
+            "kept losing the ball near "
+            f"{'your' if press['team'] != focus else 'their'} own goal."
+        ),
     ]
     threat = next(f for f in findings if f["id"] == "threat")
-    story.append(f"Most of the danger since then has come down the {threat['channel']}, through "
-                 f"{' and '.join(threat['creators'])}.")
+    story.append(
+        "Most of the danger since then has come down the "
+        f"{threat['channel']}, through "
+        f"{' and '.join(threat['creators'])}."
+    )
     spotlight = None
     if player:
-        p = next((p for p in facts["players"].values() if p["name"].lower() == player.lower()), None)
+        p = next(
+            (
+                p
+                for p in facts["players"].values()
+                if p["name"].lower() == player.lower()
+            ),
+            None,
+        )
         if p:
-            bits = [f"{p['passes']} passes ({round(100 * (p['pass_accuracy'] or 0))}% accurate)"]
+            bits = [
+                f"{p['passes']} passes "
+                f"({round(100 * (p['pass_accuracy'] or 0))}% accurate)"
+            ]
             if p["goals"]:
-                bits.append(f"{p['goals']} goal{'s' if p['goals'] > 1 else ''}")
+                bits.append(
+                    f"{p['goals']} goal{'s' if p['goals'] > 1 else ''}"
+                )
             if p["shots"]:
-                bits.append(f"{p['shots']} shot{'s' if p['shots'] > 1 else ''} worth {p['xg']} xG")
+                bits.append(
+                    f"{p['shots']} shot{'s' if p['shots'] > 1 else ''} worth "
+                    f"{p['xg']} xG"
+                )
             if p["xt_created"] >= 0.1:
                 bits.append("one of the most dangerous passers on the pitch")
             if p["defensive_actions"]:
-                bits.append(f"{p['defensive_actions']} tackles and interceptions")
+                bits.append(
+                    f"{p['defensive_actions']} tackles and interceptions"
+                )
             if p["top_sprint_kmh"]:
                 bits.append(f"top sprint {p['top_sprint_kmh']} km/h")
-            spotlight = {"player": p["name"], "line": f"{p['name']}: " + ", ".join(bits) + "."}
-    watch = (f"Watch whether {names[focus]} can play through the press after the break."
-             if press["team"] != focus else f"Watch whether {names[focus]} can keep the press going for 45 more minutes.")
-    return {"headline": headline, "story": story, "spotlight": spotlight, "watch_for": watch,
-            "language": "en"}
+            spotlight = {
+                "player": p["name"],
+                "line": f"{p['name']}: " + ", ".join(bits) + ".",
+            }
+    watch = (
+        f"Watch whether {names[focus]} can play through the press after "
+        "the break."
+        if press["team"] != focus
+        else f"Watch whether {names[focus]} can keep the press going for "
+        "45 more minutes."
+    )
+    return {
+        "headline": headline,
+        "story": story,
+        "spotlight": spotlight,
+        "watch_for": watch,
+        "language": "en",
+    }
 
 
-def overlays(findings: list[dict], facts: dict, focus: str, mode: str) -> list[dict]:
-    """Timed graphics cards for a half-time show segment (seconds from segment start)."""
+def overlays(
+    findings: list[dict], facts: dict, focus: str, mode: str
+) -> list[dict]:
+    """Timed graphics cards for a half-time show segment.
+
+    Card times are seconds from the start of the segment.
+    """
     names = facts["teams"]
     s = facts["summary"]
-    cards = [{
-        "at_s": 0, "duration_s": 6, "type": "scorebug",
-        "home": names["home"], "away": names["away"],
-        "score": f"{facts['score']['home']}-{facts['score']['away']}", "label": "Half-time",
-    }, {
-        "at_s": 6, "duration_s": 8, "type": "stat_bars", "title": "First half",
-        "rows": [{"label": "Possession %", "home": s["home"]["possession_pct"], "away": s["away"]["possession_pct"]},
-                 {"label": "xG", "home": s["home"]["xg"], "away": s["away"]["xg"]},
-                 {"label": "Threat (xT)", "home": s["home"]["xt_created"], "away": s["away"]["xt_created"]},
-                 {"label": "Shots", "home": s["home"]["shots"], "away": s["away"]["shots"]}],
-    }, {
-        "at_s": 14, "duration_s": 8, "type": "momentum", "title": "Who had the upper hand",
-        "series": [{"from": w["from"], "to": w["to"], "value": w["momentum"]} for w in facts["timeline"]],
-        "marker": {"minute": facts["turning_point"]["minute"], "label": "Turning point"},
-    }]
+    cards = [
+        {
+            "at_s": 0,
+            "duration_s": 6,
+            "type": "scorebug",
+            "home": names["home"],
+            "away": names["away"],
+            "score": f"{facts['score']['home']}-{facts['score']['away']}",
+            "label": "Half-time",
+        },
+        {
+            "at_s": 6,
+            "duration_s": 8,
+            "type": "stat_bars",
+            "title": "First half",
+            "rows": [
+                {
+                    "label": "Possession %",
+                    "home": s["home"]["possession_pct"],
+                    "away": s["away"]["possession_pct"],
+                },
+                {
+                    "label": "xG",
+                    "home": s["home"]["xg"],
+                    "away": s["away"]["xg"],
+                },
+                {
+                    "label": "Threat (xT)",
+                    "home": s["home"]["xt_created"],
+                    "away": s["away"]["xt_created"],
+                },
+                {
+                    "label": "Shots",
+                    "home": s["home"]["shots"],
+                    "away": s["away"]["shots"],
+                },
+            ],
+        },
+        {
+            "at_s": 14,
+            "duration_s": 8,
+            "type": "momentum",
+            "title": "Who had the upper hand",
+            "series": [
+                {"from": w["from"], "to": w["to"], "value": w["momentum"]}
+                for w in facts["timeline"]
+            ],
+            "marker": {
+                "minute": facts["turning_point"]["minute"],
+                "label": "Turning point",
+            },
+        },
+    ]
     at = 22
     for f in findings:
-        cards.append({"at_s": at, "duration_s": 7, "type": "lower_third", "concept": f["concept"],
-                      "team": names[f["team"]], "title": f["title"] if mode == "analyst"
-                      else f["title"].split(" (")[0]})
+        cards.append(
+            {
+                "at_s": at,
+                "duration_s": 7,
+                "type": "lower_third",
+                "concept": f["concept"],
+                "team": names[f["team"]],
+                "title": f["title"]
+                if mode == "analyst"
+                else f["title"].split(" (")[0],
+            }
+        )
         at += 7
     return cards
 
@@ -423,31 +759,42 @@ def overlays(findings: list[dict], facts: dict, focus: str, mode: str) -> list[d
 # Instructions for the model-backed agents
 # ---------------------------------------------------------------------------
 
-TACTICS_INSTRUCTIONS = """You are the tactics analyst for a football club. You get first-half facts as JSON,
-already computed from the event data, and tools to look up more. Find exactly three findings, using
-these ids: "press" (a change in pressing and what it did), "threat" (where the dominant side's
-attacking threat comes from), "scoreline" (the focus team's goals versus their chance quality, and
-their weakest link under pressure). Every claim must quote numbers from the facts or tools; never
-invent a statistic. Return a JSON list; each item needs id, concept, team ("home" or "away"),
-title (one sentence), evidence (list of {label, before, after} or {label, value}), minute, and
-for "threat" also channel and creators, for "scoreline" also goals_minus_xg and weak_link."""
+TACTICS_INSTRUCTIONS = """\
+You are the tactics analyst for a football club. You get first-half facts as
+JSON, already computed from the event data, and tools to look up more. Find
+exactly three findings, using these ids: "press" (a change in pressing and what
+it did), "threat" (where the dominant side's attacking threat comes from),
+"scoreline" (the focus team's goals versus their chance quality, and their
+weakest link under pressure). Every claim must quote numbers from the facts or
+tools; never invent a statistic. Return a JSON list; each item needs id,
+concept, team ("home" or "away"), title (one sentence), evidence (list of
+{label, before, after} or {label, value}), minute, and for "threat" also
+channel and creators, for "scoreline" also goals_minus_xg and weak_link.
+"""
 
-EXPLAINER_INSTRUCTIONS = """You explain football analysis to people who did not see the numbers. For
-each finding, say in two or three plain sentences why it matters to the result, using one lens:
-"Control vs chaos", "Game rhythm", "Pressure" or "Chance quality". Return a JSON list of
-{id, concept, why_it_matters}. Keep every number you mention identical to the input."""
+EXPLAINER_INSTRUCTIONS = """\
+You explain football analysis to people who did not see the numbers. For each
+finding, say in two or three plain sentences why it matters to the result,
+using one lens: "Control vs chaos", "Game rhythm", "Pressure" or "Chance
+quality". Return a JSON list of {id, concept, why_it_matters}. Keep every
+number you mention identical to the input.
+"""
 
-COACH_INSTRUCTIONS = """You are the assistant coach writing the half-time briefing for the focus
-team. Turn the findings into exactly three changes for the second half, one per finding. Each
-change names real players from the squad list and is something a coach can say in the dressing
-room. Return a JSON list of {finding, action, watch}, where watch is one measurable target for the
-second half."""
+COACH_INSTRUCTIONS = """\
+You are the assistant coach writing the half-time briefing for the focus team.
+Turn the findings into exactly three changes for the second half, one per
+finding. Each change names real players from the squad list and is something a
+coach can say in the dressing room. Return a JSON list of {finding, action,
+watch}, where watch is one measurable target for the second half.
+"""
 
-FAN_INSTRUCTIONS = """You are a match-day presenter writing a half-time story for a fan of the focus
-team, in the requested language. Be warm and clear, no jargon unless explained. If a favourite
-player is given, include a spotlight on them using their real stats. Return JSON
-{headline, story (list of 3 short paragraphs), spotlight ({player, line} or null), watch_for,
-language}."""
+FAN_INSTRUCTIONS = """\
+You are a match-day presenter writing a half-time story for a fan of the focus
+team, in the requested language. Be warm and clear, no jargon unless explained.
+If a favourite player is given, include a spotlight on them using their real
+stats. Return JSON {headline, story (list of 3 short paragraphs), spotlight
+({player, line} or null), watch_for, language}.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -455,23 +802,56 @@ language}."""
 # ---------------------------------------------------------------------------
 
 
-async def half_time_briefing(match: dict, *, mode: str = "analyst", focus: str = "home",
-                             player: str | None = None, language: str = "en", client=None) -> dict:
+async def half_time_briefing(
+    match: dict,
+    *,
+    mode: str = "analyst",
+    focus: str = "home",
+    player: str | None = None,
+    language: str = "en",
+    client: BaseChatClient | None = None,
+) -> dict:
+    """Run all five agents and return the briefing for one audience.
+
+    Model-backed steps fall back to their rule-based versions when no client
+    is configured or a reply cannot be parsed, so the output shape never
+    changes.
+    """
     trace = []
 
     def step(agent: str, backend: str, started: float, note: str = ""):
-        trace.append({"agent": agent, "backend": backend, "ms": round(1000 * (time.perf_counter() - started)),
-                      "note": note})
+        trace.append(
+            {
+                "agent": agent,
+                "backend": backend,
+                "ms": round(1000 * (time.perf_counter() - started)),
+                "note": note,
+            }
+        )
 
-    async def model_or_rules(agent: str, instructions: str, payload: dict, fallback, tools=None):
+    async def model_or_rules(
+        agent: str,
+        instructions: str,
+        payload: dict,
+        fallback: Callable[[], Any],
+        tools: list[FunctionTool] | None = None,
+    ) -> Any:
         started = time.perf_counter()
         if client is not None:
             try:
-                out = await _run_agent(client, agent, instructions, payload, tools)
+                out = await _run_agent(
+                    client, agent, instructions, payload, tools
+                )
                 step(agent, backend_name(client), started)
                 return out
-            except Exception as exc:  # a broken reply should not break the show
-                step(agent, "offline-rules", started, f"model step failed ({type(exc).__name__}), used rules")
+            # A broken reply should not break the show.
+            except Exception as exc:
+                step(
+                    agent,
+                    "offline-rules",
+                    started,
+                    f"model step failed ({type(exc).__name__}), used rules",
+                )
                 return fallback()
         out = fallback()
         step(agent, "offline-rules", started)
@@ -479,47 +859,104 @@ async def half_time_briefing(match: dict, *, mode: str = "analyst", focus: str =
 
     started = time.perf_counter()
     facts = metrics.half_time_facts(match)
-    step("stats", "deterministic", started, f"{len(metrics.window(match['events']))} first-half events")
+    step(
+        "stats",
+        "deterministic",
+        started,
+        f"{len(metrics.window(match['events']))} first-half events",
+    )
 
     focus_name = facts["teams"][focus]
-    slim = {k: facts[k] for k in ("teams", "score", "summary", "turning_point", "threat_channels", "key_moments")}
+    slim = {
+        k: facts[k]
+        for k in (
+            "teams",
+            "score",
+            "summary",
+            "turning_point",
+            "threat_channels",
+            "key_moments",
+        )
+    }
     slim["focus_team"] = focus
 
     findings = await model_or_rules(
-        "tactics", TACTICS_INSTRUCTIONS, slim,
+        "tactics",
+        TACTICS_INSTRUCTIONS,
+        slim,
         lambda: tactics_offline(facts, match, focus),
-        tools=build_tools(match) if client is not None else None)
+        tools=build_tools(match) if client is not None else None,
+    )
     explanations = await model_or_rules(
-        "explainer", EXPLAINER_INSTRUCTIONS, {"findings": findings, "focus_team": focus_name},
-        lambda: explain_offline(findings, facts, focus))
+        "explainer",
+        EXPLAINER_INSTRUCTIONS,
+        {"findings": findings, "focus_team": focus_name},
+        lambda: explain_offline(findings, facts, focus),
+    )
 
     result: dict[str, Any] = {
-        "match_id": facts["match_id"], "mode": mode, "focus": focus, "focus_team": focus_name,
-        "teams": facts["teams"], "score": facts["score"], "summary": facts["summary"],
-        "timeline": facts["timeline"], "turning_point_minute": facts["turning_point"]["minute"],
-        "key_moments": facts["key_moments"], "shots": facts["shots"],
-        "findings": findings, "explanations": explanations,
+        "match_id": facts["match_id"],
+        "mode": mode,
+        "focus": focus,
+        "focus_team": focus_name,
+        "teams": facts["teams"],
+        "score": facts["score"],
+        "summary": facts["summary"],
+        "timeline": facts["timeline"],
+        "turning_point_minute": facts["turning_point"]["minute"],
+        "key_moments": facts["key_moments"],
+        "shots": facts["shots"],
+        "findings": findings,
+        "explanations": explanations,
     }
     if mode == "analyst":
-        squad = [{"name": p["name"], "position": p["position"], "top_speed_kmh": p["top_speed_kmh"]}
-                 for p in match["teams"][focus]["players"]]
+        squad = [
+            {
+                "name": p["name"],
+                "position": p["position"],
+                "top_speed_kmh": p["top_speed_kmh"],
+            }
+            for p in match["teams"][focus]["players"]
+        ]
         result["changes"] = await model_or_rules(
-            "coach", COACH_INSTRUCTIONS,
-            {"focus_team": focus_name, "findings": findings, "explanations": explanations, "squad": squad},
-            lambda: coach_offline(findings, facts, match, focus))
+            "coach",
+            COACH_INSTRUCTIONS,
+            {
+                "focus_team": focus_name,
+                "findings": findings,
+                "explanations": explanations,
+                "squad": squad,
+            },
+            lambda: coach_offline(findings, facts, match, focus),
+        )
     else:
         players = {p["name"]: p for p in facts["players"].values()}
         result["fan"] = await model_or_rules(
-            "fan", FAN_INSTRUCTIONS,
-            {"focus_team": focus_name, "language": language, "score": facts["score"], "teams": facts["teams"],
-             "findings": findings, "favourite_player": players.get(player) if player else None,
-             "goals": [m for m in facts["key_moments"] if m["kind"] == "goal"]},
-            lambda: fan_offline(findings, facts, focus, player))
+            "fan",
+            FAN_INSTRUCTIONS,
+            {
+                "focus_team": focus_name,
+                "language": language,
+                "score": facts["score"],
+                "teams": facts["teams"],
+                "findings": findings,
+                "favourite_player": players.get(player) if player else None,
+                "goals": [
+                    m for m in facts["key_moments"] if m["kind"] == "goal"
+                ],
+            },
+            lambda: fan_offline(findings, facts, focus, player),
+        )
         if client is None and language != "en":
-            result["fan"]["note"] = "Offline mode writes English only; connect a model for other languages."
+            result["fan"]["note"] = (
+                "Offline mode writes English only; connect a model for other "
+                "languages."
+            )
 
     started = time.perf_counter()
     result["overlays"] = overlays(findings, facts, focus, mode)
-    step("overlay", "deterministic", started, f"{len(result['overlays'])} cards")
+    step(
+        "overlay", "deterministic", started, f"{len(result['overlays'])} cards"
+    )
     result["trace"] = trace
     return result

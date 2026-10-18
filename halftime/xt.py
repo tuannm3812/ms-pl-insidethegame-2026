@@ -21,12 +21,14 @@ CACHE = Path(__file__).resolve().parent.parent / "data" / "xt_grid.json"
 
 
 def cell(x: float, y: float) -> tuple[int, int]:
+    """Map a pitch coordinate to its xT grid cell."""
     cx = min(NX - 1, max(0, int(x / PITCH_X * NX)))
     cy = min(NY - 1, max(0, int(y / PITCH_Y * NY)))
     return cx, cy
 
 
 def fit_xt(matches: list[dict], iterations: int = 6) -> list[list[float]]:
+    """Fit an expected-threat grid from simulated matches (Singh's model)."""
     shots = [[0] * NY for _ in range(NX)]
     goals = [[0] * NY for _ in range(NX)]
     moves = [[0] * NY for _ in range(NX)]
@@ -54,7 +56,9 @@ def fit_xt(matches: list[dict], iterations: int = 6) -> list[list[float]]:
                 if not total:
                     continue
                 p_shot = shots[cx][cy] / total
-                p_goal = goals[cx][cy] / shots[cx][cy] if shots[cx][cy] else 0.0
+                p_goal = (
+                    goals[cx][cy] / shots[cx][cy] if shots[cx][cy] else 0.0
+                )
                 move_val = 0.0
                 if moves[cx][cy]:
                     for (dx, dy), n in trans.get((cx, cy), {}).items():
@@ -78,12 +82,22 @@ def grid(n_matches: int = 40) -> list[list[float]]:
     matches = [generate_match(seed=1000 + i) for i in range(n_matches)]
     _GRID = fit_xt(matches)
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps({"nx": NX, "ny": NY, "fitted_on_matches": n_matches,
-                                 "grid": _GRID}, indent=1))
+    CACHE.write_text(
+        json.dumps(
+            {
+                "nx": NX,
+                "ny": NY,
+                "fitted_on_matches": n_matches,
+                "grid": _GRID,
+            },
+            indent=1,
+        )
+    )
     return _GRID
 
 
 def value(x: float, y: float) -> float:
+    """Expected threat of holding the ball at a pitch coordinate."""
     cx, cy = cell(x, y)
     return grid()[cx][cy]
 
