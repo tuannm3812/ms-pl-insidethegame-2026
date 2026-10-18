@@ -130,5 +130,6 @@ def test_parse_json_reply_ignores_prose_and_fences():
     assert parse_json_reply('Here are the findings:\n[{"a": 1}]\nHope this helps.') == [{"a": 1}]
     assert parse_json_reply('```json\n{"b": [2, 3]}\n```') == {"b": [2, 3]}
     assert parse_json_reply('Score [1-0] then {"c": true}') == {"c": True}
+    assert parse_json_reply('I found [3] key patterns.\n[{"id": "press"}]') == [{"id": "press"}]
     with pytest.raises(ValueError):
         parse_json_reply("no json here")
