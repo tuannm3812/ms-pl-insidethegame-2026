@@ -38,6 +38,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
 python -m pytest -q               # 11 tests
+ruff format . && ruff check .     # style and lint, as CI runs them
 python -m halftime.mcp_server     # MCP server over stdio
 ```
 
@@ -76,3 +77,9 @@ Without the two `FOUNDRY_*` variables, the deployed app still works using the ru
 - Tested live on Microsoft Foundry (gpt-4.1-mini, key-based Azure OpenAI endpoint): the tactics, explainer and coach agents all returned valid replies, about 15 s of model time per briefing.
 - Offline fan mode writes English only. Other languages need a model.
 - The synthetic data has more turnovers than a real match, which makes PPDA run low. The demo match is seed 27: the home side leads 1-0, but the away side switches to a high press at 25' and takes over.
+
+## Contributing
+
+Coding standards for people and agents are in [AGENTS.md](AGENTS.md) and
+[docs/0_coding_standards.md](docs/0_coding_standards.md). Agent work and
+review passes are logged in [docs/5_agent_log.md](docs/5_agent_log.md).
