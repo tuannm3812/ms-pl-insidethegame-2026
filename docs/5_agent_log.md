@@ -665,3 +665,38 @@ alone cannot distinguish model use from a successful fallback.
 **Limits.** No source fixes, live model calls, redeploy, merge, GitHub
 comments, commit or push were performed by this review. Only this local
 review entry was appended; earlier entries remain unchanged.
+
+## 2026-10-18 · Claude · Front-end polish for the demo
+
+**Changed.** Only `static/index.html` and the three screenshots in `docs/`;
+no Python, API or agent output changed.
+
+- A full-width "agent pipeline" card under the controls shows the five
+  steps in run order with each one's role, backend and time, read from the
+  briefing's `trace`. Backends are labelled `code` (deterministic),
+  `model`, `rules` (offline) or `fallback` (a model reply was rejected,
+  detected by "failed" in the trace note). Steps reveal one after another
+  once the reply arrives; that animation is cosmetic, the times are real.
+- While a briefing is in flight the pipeline shows "Running", the output
+  card shows an elapsed-time counter, and the controls are disabled. A
+  request counter drops stale replies when the user switches quickly, and a
+  failed request shows an error instead of a blank card.
+- Broadcast-style scorebug with a clock; during the replay it ticks the
+  minute, updates the score on the goal and the shot map fills in as shots
+  happen.
+- The overlay cards (scorebug, stat bars, momentum, lower thirds) are drawn
+  in a 16:9 preview with play and per-card controls, at a third of their
+  real durations. The raw JSON stays under a disclosure.
+- The spell after the turning point is shaded on the momentum chart;
+  evidence chips bold the "after" value; fan output is right-to-left when
+  the fan agent returns Arabic.
+
+**Verified.** Headless Chromium against a local offline server (seed 27):
+analyst, fan, replay, overlay playback, dark mode and a 390 px viewport
+(no horizontal scroll). A mocked trace with two model steps and one
+fallback was used only to check how those states render; it is not a live
+result. No console errors besides the missing favicon. `ruff format
+--check`, `ruff check` and `pytest` (39 passed) are green.
+
+**Not verified.** Not run against the live Foundry backend, so the model
+backend label shows the client class name as `/api/health` reports it.

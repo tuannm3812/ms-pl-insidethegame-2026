@@ -7,98 +7,217 @@
 <style>
   :root {
     color-scheme: light;
-    --surface-0: #f3f2ef; --surface-1: #fcfcfb; --border: #e2e0da;
+    --surface-0: #f3f2ef; --surface-1: #fcfcfb; --surface-2: #f0efeb; --border: #e2e0da;
     --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
     --home: #2a78d6; --away: #eb6834; --accent: #2a78d6; --pitch: #eef4ee; --pitch-line: #b9c9b9;
+    --model: #7a4fd6; --model-bg: #f1ecfb; --rules: #52514e; --rules-bg: #efeeea;
+    --data: #2f8a5b; --data-bg: #e8f3ec; --warn: #b5650d; --warn-bg: #fbf0e2;
+    --bug: #0e1420; --bug-text: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --surface-0: #111110; --surface-1: #1a1a19; --border: #33322f;
+      --surface-0: #111110; --surface-1: #1a1a19; --surface-2: #222220; --border: #33322f;
       --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
       --home: #3987e5; --away: #d95926; --accent: #3987e5; --pitch: #1d241d; --pitch-line: #3c4a3c;
+      --model: #a685f0; --model-bg: #261f38; --rules: #c3c2b7; --rules-bg: #262624;
+      --data: #5bbf8a; --data-bg: #1a2a21; --warn: #e3a050; --warn-bg: #33261a;
+      --bug: #000000; --bug-text: #ffffff;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-0: #111110; --surface-1: #1a1a19; --border: #33322f;
+    --surface-0: #111110; --surface-1: #1a1a19; --surface-2: #222220; --border: #33322f;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
     --home: #3987e5; --away: #d95926; --accent: #3987e5; --pitch: #1d241d; --pitch-line: #3c4a3c;
+    --model: #a685f0; --model-bg: #261f38; --rules: #c3c2b7; --rules-bg: #262624;
+    --data: #5bbf8a; --data-bg: #1a2a21; --warn: #e3a050; --warn-bg: #33261a;
+    --bug: #000000; --bug-text: #ffffff;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--surface-0); color: var(--text-primary);
          font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
-  header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
-  h1 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text-secondary); letter-spacing: .02em; }
-  .scorebug { display: flex; align-items: center; gap: 14px; font-size: 22px; font-weight: 650; }
-  .scorebug .score { font-variant-numeric: tabular-nums; padding: 2px 12px; border-radius: 6px;
-                     background: var(--surface-1); border: 1px solid var(--border); }
-  .scorebug small { font-size: 12px; font-weight: 500; color: var(--text-muted); }
-  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
-  .scorebug .score { white-space: nowrap; }
-  @media (max-width: 600px) { .scorebug { font-size: 17px; gap: 8px; flex-wrap: wrap; } }
+  button, select { font: inherit; }
+  button:disabled, select:disabled { opacity: .55; cursor: progress; }
+
+  /* Header and broadcast-style scorebug */
+  header { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; }
+  .brand h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .brand p { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+  .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 5px 11px;
+           border-radius: 999px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rules); }
+  .badge.live .dot { background: var(--model); box-shadow: 0 0 0 3px var(--model-bg); }
+  .scorebug { display: flex; align-items: stretch; margin-top: 18px; border-radius: 10px; overflow: hidden;
+              background: var(--bug); color: var(--bug-text); width: fit-content; max-width: 100%;
+              box-shadow: 0 6px 20px rgba(0,0,0,.14); font-weight: 650; }
+  .scorebug .team { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 18px;
+                    text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+  .scorebug .team::before { content: ""; width: 6px; align-self: stretch; border-radius: 3px; background: var(--c); }
+  .scorebug .team.away { flex-direction: row-reverse; }
+  .scorebug .score { display: grid; place-items: center; padding: 0 18px; font-size: 26px; background: rgba(255,255,255,.1);
+                     font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scorebug .clock { display: grid; place-items: center; padding: 0 14px; font-size: 14px; background: var(--accent);
+                     font-variant-numeric: tabular-nums; min-width: 56px; }
+  .scorebug .clock.live { background: #d13438; }
+  .scorebug.flash .score { animation: flash 1.2s ease; }
+  @keyframes flash { 0%, 100% { background: rgba(255,255,255,.1); } 30% { background: #ffd23f; color: #111; } }
+  @media (max-width: 600px) {
+    .scorebug { width: 100%; }
+    .scorebug .team { font-size: 12px; padding: 8px; gap: 6px; letter-spacing: 0; flex: 1 1 0; min-width: 0; }
+    .scorebug .team .nm { overflow: hidden; text-overflow: ellipsis; }
+    .scorebug .score { font-size: 19px; padding: 0 10px; }
+    .scorebug .clock { min-width: 44px; padding: 0 8px; font-size: 12px; }
+  }
+
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; align-items: center; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 7px 14px; font: inherit; cursor: pointer; }
+  .seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 7px 14px; cursor: pointer; }
   .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-  select, .btn { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+  select, .btn { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
                  background: var(--surface-1); color: var(--text-primary); }
   .btn { cursor: pointer; }
-  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; }
-  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .btn.primary { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 0 0 10px; font-weight: 600; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; margin-top: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
   .stack { display: grid; gap: 16px; align-content: start; }
   svg { display: block; width: 100%; height: auto; }
   svg text { fill: var(--text-secondary); font-size: 11px; }
-  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-top: 6px; flex-wrap: wrap; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+
+  /* Agent pipeline: the multi-agent story, kept on screen */
+  .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px; position: relative; }
+  .node { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+          background: var(--surface-1); transition: border-color .3s, background .3s, transform .3s; }
+  .node:not(:last-child)::after { content: "→"; position: absolute; right: -18px; top: 50%; transform: translateY(-50%);
+                                   color: var(--text-muted); font-size: 15px; }
+  .node .name { font-weight: 650; font-size: 14px; text-transform: capitalize; display: flex; align-items: center; gap: 6px; }
+  .node .role { font-size: 12px; color: var(--text-muted); line-height: 1.35; margin-top: 1px; min-height: 2.7em; }
+  .node .status { margin-top: 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center;
+                  font-variant-numeric: tabular-nums; color: var(--text-secondary); min-height: 22px; }
+  .kind { font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 999px; letter-spacing: .02em; white-space: nowrap; }
+  .kind.data { color: var(--data); background: var(--data-bg); }
+  .kind.model { color: var(--model); background: var(--model-bg); }
+  .kind.rules { color: var(--rules); background: var(--rules-bg); }
+  .kind.fallback { color: var(--warn); background: var(--warn-bg); }
+  .node.k-model { border-color: var(--model); }
+  .node.k-fallback { border-color: var(--warn); }
+  .node .note { flex-basis: 100%; color: var(--text-muted); font-size: 11.5px; line-height: 1.35; }
+  .node.working { border-style: dashed; }
+  .node.working .status::before { content: ""; width: 10px; height: 10px; border-radius: 50%;
+                                   border: 2px solid var(--text-muted); border-top-color: transparent; animation: spin .8s linear infinite; }
+  .node.done { animation: pop .35s ease; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pop { 0% { transform: scale(.97); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
+  .pipe-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 12px; color: var(--text-muted); align-items: center; }
+  @media (max-width: 860px) {
+    .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .node:not(:last-child)::after { display: none; }
+  }
+
+  /* Briefing output */
+  #out { position: relative; min-height: 220px; }
+  #out.loading > *:not(.loader) { opacity: .3; transition: opacity .2s; }
+  .loader { position: absolute; inset: 0; display: none; place-items: center; text-align: center; z-index: 2; }
+  #out.loading .loader { display: grid; }
+  .loader b { display: block; font-size: 16px; }
+  .loader span { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .change { border-top: 1px solid var(--border); padding: 14px 0 4px; }
+  .change:first-of-type { border-top: 0; padding-top: 0; }
+  .change .num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+                 background: var(--accent); color: #fff; font-size: 13px; font-weight: 650; margin-right: 10px; flex: none; }
+  .change h3 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: flex-start; line-height: 1.4; }
+  .change p { margin: 6px 0; color: var(--text-secondary); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: 36px; }
+  .tag { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  .concept { font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px;
+             border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); }
+  .change .body { margin-left: 36px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary);
+          font-variant-numeric: tabular-nums; }
+  .chip b { color: var(--text-primary); font-weight: 650; }
+  .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
+  .watch b { color: var(--text-muted); font-weight: 650; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; margin-right: 4px; }
+  .fan h3 { font-size: 24px; margin: 0 0 10px; line-height: 1.25; }
+  .fan p { margin: 8px 0; }
+  .spot { margin: 12px 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border);
+          border-inline-start: 4px solid var(--accent); }
+  .reveal > * { animation: rise .45s ease both; }
+  .reveal > *:nth-child(2) { animation-delay: .08s; } .reveal > *:nth-child(3) { animation-delay: .16s; }
+  .reveal > *:nth-child(4) { animation-delay: .24s; } .reveal > *:nth-child(5) { animation-delay: .32s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* Broadcast overlay preview */
+  .tv { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; color: #fff;
+        background: radial-gradient(ellipse at 50% 120%, #3f8f4e 0%, #2b6b38 45%, #1c4626 100%); }
+  .tv::before { content: ""; position: absolute; inset: 8% 6%; border: 2px solid rgba(255,255,255,.22); border-radius: 4px; }
+  .tv::after { content: ""; position: absolute; left: 50%; top: 8%; bottom: 8%; border-left: 2px solid rgba(255,255,255,.22); }
+  .tv .gfx { position: absolute; z-index: 1; animation: rise .4s ease both; }
+  .tv .mini-bug { left: 4%; top: 6%; display: flex; font-size: clamp(9px, 1.6vw, 13px); font-weight: 650; border-radius: 6px;
+                  overflow: hidden; background: rgba(8,12,20,.88); text-transform: uppercase; }
+  .tv .mini-bug span { padding: 4px 8px; white-space: nowrap; }
+  .tv .mini-bug .s { background: rgba(255,255,255,.12); font-variant-numeric: tabular-nums; }
+  .tv .mini-bug .ht { background: var(--accent); }
+  .tv .panel { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 70%; padding: 3% 4%;
+               background: rgba(8,12,20,.88); border-radius: 8px; font-size: clamp(9px, 1.5vw, 13px); }
+  .tv .panel h4 { margin: 0 0 6px; font-size: 1.15em; text-transform: uppercase; letter-spacing: .05em; }
+  .tv .prow { display: grid; grid-template-columns: 3.4em 1fr 3.4em; gap: 6px; align-items: center; margin: 3px 0;
+              font-variant-numeric: tabular-nums; }
+  .tv .prow .lab { grid-column: 1 / -1; opacity: .7; font-size: .85em; margin-bottom: -3px; }
+  .tv .prow .bar { display: flex; height: 6px; gap: 2px; } .tv .prow .bar i { border-radius: 3px; }
+  .tv .prow .r { text-align: right; }
+  .tv .lower { left: 4%; right: 4%; bottom: 7%; display: flex; align-items: stretch; border-radius: 6px; overflow: hidden;
+               font-size: clamp(10px, 1.7vw, 15px); background: rgba(8,12,20,.9); }
+  .tv .lower .k { padding: 6px 10px; background: var(--accent); font-weight: 700; text-transform: uppercase; font-size: .8em;
+                  letter-spacing: .05em; display: grid; place-items: center; white-space: nowrap; }
+  .tv .lower .t { padding: 6px 12px; font-weight: 600; }
+  .tv-bar { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .tv-dots { display: flex; gap: 4px; flex: 1; min-width: 160px; }
+  .tv-dots button { flex: 1; height: 6px; padding: 0; border: 0; border-radius: 3px; background: var(--border); cursor: pointer; }
+  .tv-dots button.on { background: var(--accent); }
+
+  .feed { height: 150px; overflow: auto; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .feed div { padding: 2px 0; animation: rise .3s ease both; }
+  .feed .big { color: var(--text-primary); font-weight: 650; }
+  details summary { cursor: pointer; color: var(--text-secondary); }
+  details + details { margin-top: 6px; }
+  pre { font-size: 12px; overflow: auto; max-height: 340px; background: var(--surface-0); padding: 10px; border-radius: 8px; }
   .bars .row { display: grid; grid-template-columns: 48px 1fr 48px; gap: 8px; align-items: center; margin: 6px 0; font-variant-numeric: tabular-nums; }
   .bars .label { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted); margin-bottom: -4px; }
   .bars .track { display: flex; gap: 2px; height: 8px; }
-  .bars .track span { border-radius: 4px; }
+  .bars .track span { border-radius: 4px; transition: flex .5s ease; }
   .bars .v { font-size: 13px; }
   .bars .v.r { text-align: right; }
-  .change { border-top: 1px solid var(--border); padding: 14px 0 4px; }
-  .change:first-of-type { border-top: 0; padding-top: 0; }
-  .change .num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
-                 background: var(--accent); color: #fff; font-size: 13px; font-weight: 650; margin-right: 8px; flex: none; }
-  .change h3 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: flex-start; }
-  .change p { margin: 6px 0; color: var(--text-secondary); }
-  .tag { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-  .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .watch { font-size: 13px; color: var(--text-primary); }
-  .watch b { color: var(--text-muted); font-weight: 600; }
-  .fan h3 { font-size: 22px; margin: 0 0 10px; line-height: 1.25; }
-  .fan p { margin: 8px 0; }
-  .spot { margin-top: 12px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); }
-  .trace { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text-secondary); }
-  .trace .step { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); }
-  .trace .step b { color: var(--text-primary); font-weight: 600; }
-  .trace .arrow { color: var(--text-muted); }
-  .feed { height: 132px; overflow: auto; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .feed div { padding: 2px 0; }
-  .muted { color: var(--text-muted); font-size: 13px; }
-  details summary { cursor: pointer; color: var(--text-secondary); }
-  pre { font-size: 12px; overflow: auto; max-height: 340px; background: var(--surface-0); padding: 10px; border-radius: 8px; }
   #tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
          border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none;
          box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 10; max-width: 240px; }
   table.data { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   table.data td, table.data th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
   table.data th:first-child, table.data td:first-child { text-align: left; }
+  .err { color: var(--warn); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <div>
-      <h1>HALF-TIME BRIEFING · synthetic match data</h1>
-      <div class="scorebug" id="scorebug">Loading…</div>
+    <div class="brand">
+      <h1>Half-time Briefing</h1>
+      <p>Five agents turn a synthetic match into a half-time briefing for analysts or fans.</p>
     </div>
-    <div class="muted" id="backend"></div>
+    <span class="badge" id="backend"><span class="dot"></span><span>Checking agents…</span></span>
   </header>
+  <div class="scorebug" id="scorebug" aria-live="polite">
+    <span class="team home" style="--c:var(--home)">Loading…</span>
+  </div>
 
   <div class="controls">
     <div class="seg" role="group" aria-label="Mode">
@@ -113,6 +232,20 @@
     </label>
     <button class="btn" id="replay">▶ Replay first half live</button>
   </div>
+
+  <section class="card" aria-labelledby="pipeHead">
+    <div class="card-head">
+      <h2 id="pipeHead">The agent pipeline</h2>
+      <span class="muted" id="pipeTotal"></span>
+    </div>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="pipe-foot">
+      <span><span class="kind data">code</span> computes every number</span>
+      <span><span class="kind model">model</span> explains and decides</span>
+      <span><span class="kind rules">rules</span> same output with no model</span>
+      <span><span class="kind fallback">fallback</span> model reply rejected, rules used</span>
+    </div>
+  </section>
 
   <div class="grid">
     <div class="stack">
@@ -133,17 +266,26 @@
       </section>
     </div>
     <div class="stack">
-      <section class="card" id="out"></section>
-      <section class="card">
-        <h2>How the agents got there</h2>
-        <div class="trace" id="trace"></div>
+      <section class="card" id="out" aria-live="polite">
+        <div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>
       </section>
       <section class="card" id="liveCard" hidden>
         <h2>Live event feed</h2>
         <div class="feed" id="feed"></div>
       </section>
       <section class="card">
-        <details><summary>Broadcast overlay cards (timed JSON)</summary><pre id="overlay"></pre></details>
+        <div class="card-head">
+          <h2>Broadcast overlays</h2>
+          <span class="muted" id="tvMeta"></span>
+        </div>
+        <div class="tv" id="tv" role="img" aria-label="Preview of the broadcast overlay cards"></div>
+        <div class="tv-bar">
+          <button class="btn" id="tvPlay">▶ Play</button>
+          <div class="tv-dots" id="tvDots"></div>
+        </div>
+      </section>
+      <section class="card">
+        <details><summary>Overlay cards as timed JSON</summary><pre id="overlay"></pre></details>
         <details><summary>Timeline as a table</summary><div id="table"></div></details>
       </section>
     </div>
@@ -151,7 +293,7 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null };
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tip = $("tip");
@@ -161,20 +303,103 @@ function hideTip() { tip.style.display = "none"; }
 const NS = "http://www.w3.org/2000/svg";
 function el(tag, attrs, parent) { const n = document.createElementNS(NS, tag);
   for (const k in attrs) n.setAttribute(k, attrs[k]); parent && parent.appendChild(n); return n; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// What each agent does, in the order the pipeline runs them.
+const ROLES = {
+  stats: "Reads every event and computes the numbers",
+  tactics: "Finds what changed and when",
+  explainer: "Explains why each finding matters",
+  coach: "Picks three changes for the second half",
+  fan: "Writes the story for one supporter",
+  overlay: "Builds timed broadcast graphics",
+};
+const plan = () => ["stats", "tactics", "explainer", state.mode === "analyst" ? "coach" : "fan", "overlay"];
+
+function kindOf(t) {
+  if (t.backend === "deterministic") return ["data", "code"];
+  if (t.backend === "offline-rules") return /failed/.test(t.note) ? ["fallback", "fallback"] : ["rules", "rules"];
+  return ["model", "model"];
+}
+
+// Draw the five steps; the first `upto` show their trace, the rest wait.
+function drawPipeline(trace, upto = Infinity) {
+  const byAgent = Object.fromEntries((trace || []).map((t) => [t.agent, t]));
+  $("pipeline").innerHTML = plan().map((a, i) => {
+    const t = i < upto ? byAgent[a] : null;
+    let status = trace ? "Waiting" : "Running", cls = trace ? "" : "working";
+    if (t) {
+      const [k, label] = kindOf(t);
+      cls = "k-" + k;
+      const note = k === "fallback" ? "Model reply rejected, used rules" : t.note;
+      status = `<span class="kind ${k}">${label}</span><span>${t.ms} ms</span>` +
+        (k === "model" ? `<span class="muted">${esc(t.backend)}</span>` : "") +
+        (note ? `<span class="note" title="${esc(t.note)}">${esc(note)}</span>` : "");
+    }
+    return `<div class="node ${cls}"><div class="name">${esc(a)}</div>
+      <div class="role">${esc(ROLES[a] || "")}</div><div class="status">${status}</div></div>`;
+  }).join("");
+}
+
+// Reveal the finished steps one after another, so the hand-offs read on screen.
+async function revealPipeline(trace, token) {
+  for (let i = 0; i < plan().length; i++) {
+    if (token !== state.req) return;
+    drawPipeline(trace, i + 1);
+    $("pipeline").children[i].classList.add("done");
+    await sleep(160);
+  }
+  const total = trace.reduce((s, t) => s + t.ms, 0);
+  const models = trace.filter((t) => kindOf(t)[0] === "model").length;
+  $("pipeTotal").textContent = `${trace.length} agents · ${total < 1000 ? total + " ms" : (total / 1000).toFixed(1) + " s"}` +
+    (models ? ` · ${models} used the model` : " · no model calls");
+}
+
+function setBusy(busy) {
+  document.querySelectorAll(".controls button, .controls select").forEach((x) => {
+    if (x.id !== "replay" || !state.replaying) x.disabled = busy;
+  });
+  $("out").classList.toggle("loading", busy);
+}
 
 async function load() {
-  state.meta = state.meta || await (await fetch("api/match")).json();
-  const h = await (await fetch("api/health")).json();
-  $("backend").textContent = h.backend === "offline-rules" ? "Agents: rule-based (no model connected)" : "Agents: " + h.backend;
-  const m = state.meta;
-  if (!$("focus").options.length) {
-    for (const s of ["home", "away"]) $("focus").add(new Option(m.teams[s].name, s));
+  const token = ++state.req;
+  setBusy(true);
+  drawPipeline(null);
+  $("pipeTotal").textContent = "";
+  const started = performance.now();
+  const timer = setInterval(() => {
+    $("elapsed").textContent = ((performance.now() - started) / 1000).toFixed(1) + " s";
+  }, 100);
+  try {
+    state.meta = state.meta || await (await fetch("api/match")).json();
+    const h = await (await fetch("api/health")).json();
+    const live = h.backend !== "offline-rules";
+    $("backend").classList.toggle("live", live);
+    $("backend").lastElementChild.textContent = live ? "Model connected: " + h.backend : "Rule-based agents (no model connected)";
+    const m = state.meta;
+    if (!$("focus").options.length) {
+      for (const s of ["home", "away"]) $("focus").add(new Option(m.teams[s].name, s));
+    }
+    fillPlayers();
+    const q = new URLSearchParams({ mode: state.mode, focus: state.focus, language: state.lang });
+    if (state.player) q.set("player", state.player);
+    const res = await fetch("api/briefing?" + q);
+    if (!res.ok) throw new Error("briefing request failed (" + res.status + ")");
+    const data = await res.json();
+    if (token !== state.req) return;
+    state.data = data;
+    clearInterval(timer);
+    setBusy(false);
+    render();
+    revealPipeline(data.trace, token);
+  } catch (err) {
+    if (token !== state.req) return;
+    setBusy(false);
+    $("out").innerHTML = `<div class="loader"></div><p class="err">Could not build the briefing: ${esc(err.message)}. Try again.</p>`;
+  } finally {
+    clearInterval(timer);
   }
-  fillPlayers();
-  const q = new URLSearchParams({ mode: state.mode, focus: state.focus, language: state.lang });
-  if (state.player) q.set("player", state.player);
-  state.data = await (await fetch("api/briefing?" + q)).json();
-  render();
 }
 
 function fillPlayers() {
@@ -184,18 +409,25 @@ function fillPlayers() {
   sel.value = keep; state.player = state.mode === "fan" ? keep : "";
 }
 
+function drawScorebug(score, clock, live) {
+  const d = state.data;
+  $("scorebug").innerHTML = `<span class="team home" style="--c:var(--home)"><span class="nm">${esc(d.teams.home)}</span></span>
+    <span class="score">${score.home} – ${score.away}</span>
+    <span class="team away" style="--c:var(--away)"><span class="nm">${esc(d.teams.away)}</span></span>
+    <span class="clock${live ? " live" : ""}">${esc(clock)}</span>`;
+}
+
 function render() {
   const d = state.data;
-  $("scorebug").innerHTML = `<span><span class="swatch" style="background:var(--home)"></span>${esc(d.teams.home)}</span>
-    <span class="score">${d.score.home} – ${d.score.away}</span>
-    <span><span class="swatch" style="background:var(--away)"></span>${esc(d.teams.away)}</span><small>HT</small>`;
+  stopTv();
+  drawScorebug(d.score, "HT", false);
   $("legend").innerHTML = `<span><span class="swatch" style="background:var(--home)"></span>${esc(d.teams.home)}</span>
     <span><span class="swatch" style="background:var(--away)"></span>${esc(d.teams.away)}</span>`;
   drawMomentum(d.timeline, d.turning_point_minute);
   drawPitch(d.shots, d.teams);
   drawBars(d.summary);
   renderOutput(d);
-  $("trace").innerHTML = d.trace.map((t) => `<span class="step"><b>${esc(t.agent)}</b> · ${esc(t.backend)} · ${t.ms} ms${t.note ? " · " + esc(t.note) : ""}</span>`).join('<span class="arrow">→</span>');
+  renderTv(d.overlays, 0);
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
     d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
@@ -205,8 +437,14 @@ function drawMomentum(tl, tp, upto = 45) {
   const svg = $("momentum"); svg.innerHTML = "";
   const W = 520, H = 190, L = 28, R = 8, T = 10, B = 26, mid = T + (H - T - B) / 2, half = (H - T - B) / 2;
   const bw = (W - L - R) / tl.length;
+  if (tp && tp < upto) {
+    // Shade the spell after the turning point so the change of game reads at a glance.
+    el("rect", { x: L + (tp / 5) * bw, y: T, width: W - R - (L + (tp / 5) * bw), height: H - T - B,
+                 fill: "var(--surface-2)", rx: 4 }, svg);
+  }
   el("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: "var(--border)" }, svg);
   tl.forEach((w, i) => {
+    el("text", { x: L + i * bw + bw / 2, y: H - 8, "text-anchor": "middle" }, svg).textContent = w.from + "'";
     if (w.from >= upto) return;
     const v = w.momentum, hgt = Math.max(2, Math.abs(v) * half), x = L + i * bw + 3;
     const g = el("g", {}, svg);
@@ -215,17 +453,17 @@ function drawMomentum(tl, tp, upto = 45) {
     const hit = el("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }, g);
     hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${w.home.xt_created}, xG ${w.home.xg}<br>Away xT ${w.away.xt_created}, xG ${w.away.xg}<br>Home possession ${w.home.possession_pct}%`));
     hit.addEventListener("mouseleave", hideTip);
-    el("text", { x: L + i * bw + bw / 2, y: H - 8, "text-anchor": "middle" }, svg).textContent = w.from + "'";
   });
   if (tp && tp < upto) {
     const x = L + (tp / 5) * bw;
-    el("line", { x1: x, x2: x, y1: T, y2: H - B, stroke: "var(--text-muted)", "stroke-dasharray": "3 3" }, svg);
-    el("text", { x: x + 4, y: T + 10 }, svg).textContent = "turning point " + tp + "'";
+    el("line", { x1: x, x2: x, y1: T, y2: H - B, stroke: "var(--text-primary)", "stroke-dasharray": "4 3", "stroke-width": 1.5 }, svg);
+    const t = el("text", { x: x + 6, y: T + 12 }, svg);
+    t.textContent = "Turning point " + tp + "'"; t.style.fontWeight = 650; t.style.fill = "var(--text-primary)";
   }
 }
 
-function drawPitch(shots, teams) {
-  const svg = $("pitch"); svg.innerHTML = ""; const s = 5, P = 0; // 105 x 68 m -> 525 x 340
+function drawPitch(shots, teams, upto = 46) {
+  const svg = $("pitch"); svg.innerHTML = ""; const s = 5; // 105 x 68 m -> 525 x 340
   const line = { fill: "none", stroke: "var(--pitch-line)", "stroke-width": 1.5 };
   el("rect", { x: 0, y: 0, width: 525, height: 340, fill: "var(--pitch)", rx: 6 }, svg);
   el("rect", { x: 1, y: 1, width: 523, height: 338, ...line }, svg);
@@ -234,21 +472,22 @@ function drawPitch(shots, teams) {
   for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
   for (const x0 of [0, 525 - 27.5]) el("rect", { x: x0, y: 170 - 45.75, width: 27.5, height: 91.5, ...line }, svg);
   for (const sh of shots) {
+    if (sh.minute >= upto) continue;
     // Home attacks right as recorded; away shots are mirrored to attack left.
     const x = sh.team === "home" ? sh.x * s : (105 - sh.x) * s, y = sh.team === "home" ? sh.y * s : (68 - sh.y) * s;
     const color = sh.team === "home" ? "var(--home)" : "var(--away)", goal = sh.outcome === "goal";
     const r = 5 + Math.sqrt(sh.xg) * 18;
     const c = el("circle", { cx: x, cy: y, r, fill: goal ? color : "transparent", "fill-opacity": goal ? 0.9 : 0,
                             stroke: color, "stroke-width": 2 }, svg);
-    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${sh.xg} · ${sh.outcome.replace("_", " ")}`));
+    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${sh.xg} · ${esc(sh.outcome.replace("_", " "))}`));
     c.addEventListener("mouseleave", hideTip);
   }
 }
 
+const BAR_ROWS = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
+                  ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
 function drawBars(sum) {
-  const rows = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
-                ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
-  $("bars").innerHTML = rows.map(([label, k, mul]) => {
+  $("bars").innerHTML = BAR_ROWS.map(([label, k, mul]) => {
     const h = +(sum.home[k] * (mul || 1)).toFixed(mul ? 0 : 2), a = +(sum.away[k] * (mul || 1)).toFixed(mul ? 0 : 2);
     const tot = h + a || 1;
     return `<div class="row"><div class="label">${label}</div><span class="v">${h}</span>
@@ -258,68 +497,132 @@ function drawBars(sum) {
 }
 
 function evidenceChips(f) {
+  const show = (x) => (x === null || x === undefined ? "n/a" : x);
   return (f.evidence || []).map((e) => {
-    const show = (x) => (x === null || x === undefined ? "n/a" : x);
-    if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → ${esc(show(e.after))}</span>`;
+    if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → <b>${esc(show(e.after))}</b></span>`;
     const v = e.value && typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${show(x)}`).join(", ") : show(e.value);
-    return `<span class="chip">${esc(e.label)}: ${esc(v)}</span>`;
+    return `<span class="chip">${esc(e.label)}: <b>${esc(v)}</b></span>`;
   }).join("");
 }
 
+const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
+  const loader = `<div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>`;
   if (d.mode === "analyst") {
-    $("out").innerHTML = `<h2>Three changes for the second half · ${esc(d.focus_team)}</h2>` + d.changes.map((c, i) => {
+    $("out").innerHTML = loader + `<h2>Three changes for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
       const f = finds[c.finding] || {}, x = expl[c.finding] || {};
+      const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
       return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(c.action)}</span></h3>
-        <div class="tag">${esc(x.concept || "")} · ${esc(f.title || "")}</div>
-        <p>${esc(x.why_it_matters || "")}</p>
+        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}<span class="tag">${esc(f.title || "")}</span></div>
+        <div class="body"><p>${esc(x.why_it_matters || "")}</p>
         <div class="chips">${evidenceChips(f)}</div>
-        <div class="watch"><b>Watch:</b> ${esc(c.watch)}</div></div>`;
-    }).join("");
+        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div></div></div>`;
+    }).join("") + "</div>";
   } else {
-    const fan = d.fan;
-    $("out").innerHTML = `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan">
+    const fan = d.fan, rtl = fan.language === "ar";
+    $("out").innerHTML = loader + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
       <h3>${esc(fan.headline)}</h3>${fan.story.map((p) => `<p>${esc(p)}</p>`).join("")}
       ${fan.spotlight ? `<div class="spot"><div class="tag">Player spotlight</div><p>${esc(fan.spotlight.line)}</p></div>` : ""}
-      <p class="watch"><b>Second half:</b> ${esc(fan.watch_for)}</p>
+      <p class="watch"><b>Second half</b> ${esc(fan.watch_for)}</p>
       ${fan.note ? `<p class="muted">${esc(fan.note)}</p>` : ""}</div>`;
   }
 }
 
-// Replay: stream the first half's events and grow the momentum chart as they arrive.
+// Broadcast preview: draws each timed overlay card the way a graphics engine would.
+const tv = { i: 0, timer: null };
+function renderTv(cards, i) {
+  tv.i = i; const c = cards[i], d = state.data;
+  const bug = `<div class="gfx mini-bug"><span>${esc(d.teams.home)}</span><span class="s">${d.score.home}-${d.score.away}</span>` +
+    `<span>${esc(d.teams.away)}</span><span class="ht">HT</span></div>`;
+  let body = "";
+  if (c.type === "stat_bars") {
+    body = `<div class="gfx panel"><h4>${esc(c.title)}</h4>` + c.rows.map((r) => {
+      const tot = (r.home + r.away) || 1;
+      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home)}</span>
+        <span class="bar"><i style="flex:${r.home / tot};background:var(--home)"></i><i style="flex:${r.away / tot};background:var(--away)"></i></span>
+        <span class="r">${esc(r.away)}</span></div>`;
+    }).join("") + "</div>";
+  } else if (c.type === "momentum") {
+    const bars = c.series.map((s) => {
+      const h = Math.max(2, Math.abs(s.value) * 40);
+      return `<i style="display:block;height:${h}px;margin-top:${s.value >= 0 ? 40 - h : 40}px;flex:1;border-radius:2px;background:var(--${s.value >= 0 ? "home" : "away"})"></i>`;
+    }).join("");
+    body = `<div class="gfx panel"><h4>${esc(c.title)}</h4><div style="display:flex;gap:3px;align-items:flex-start;height:82px">${bars}</div>` +
+      (c.marker ? `<div style="font-size:.85em;opacity:.8;margin-top:4px">${esc(c.marker.label)} · ${esc(c.marker.minute)}'</div>` : "") + "</div>";
+  } else if (c.type === "lower_third") {
+    body = `<div class="gfx lower"><span class="k">${esc(CONCEPTS[c.concept] || c.concept)}</span><span class="t">${esc(c.title)}</span></div>`;
+  }
+  $("tv").innerHTML = bug + body;
+  $("tvDots").innerHTML = cards.map((x, j) => `<button class="${j <= i ? "on" : ""}" aria-label="Card ${j + 1}: ${esc(x.type)} at ${x.at_s} s"></button>`).join("");
+  [...$("tvDots").children].forEach((b, j) => b.addEventListener("click", () => { stopTv(); renderTv(cards, j); }));
+  $("tvMeta").textContent = `Card ${i + 1} of ${cards.length} · ${c.at_s} s, on for ${c.duration_s} s`;
+}
+function stopTv() { clearTimeout(tv.timer); tv.timer = null; $("tvPlay").textContent = "▶ Play"; }
+function playTv() {
+  const cards = state.data.overlays;
+  if (tv.timer) return stopTv();
+  $("tvPlay").textContent = "❚❚ Pause";
+  if (tv.i >= cards.length - 1) renderTv(cards, 0);
+  // Real durations are 6-8 s per card; play them at a third of that so a demo keeps moving.
+  const step = () => {
+    tv.timer = setTimeout(() => {
+      if (tv.i >= cards.length - 1) return stopTv();
+      renderTv(cards, tv.i + 1); step();
+    }, cards[tv.i].duration_s * 1000 / 3);
+  };
+  step();
+}
+
+// Replay: stream the first half's events, ticking the clock, score, chart and shot map as they arrive.
 async function replay() {
+  const d = state.data;
+  if (!d || state.replaying) return;
+  state.replaying = true;
+  const btn = $("replay"); btn.disabled = true;
   const evs = await (await fetch("api/events?half=1")).json();
   $("liveCard").hidden = false; const feed = $("feed"); feed.innerHTML = "";
-  const names = { home: state.data.teams.home, away: state.data.teams.away };
   const interesting = new Set(["shot", "goal", "sprint", "foul"]);
-  let i = 0; const btn = $("replay"); btn.disabled = true;
+  const score = { home: 0, away: 0 };
+  let i = 0;
   for (let minute = 0; minute <= 46; minute++) {
     while (i < evs.length && evs[i].minute < minute) {
       const e = evs[i++];
+      if (e.type === "goal") {
+        Object.assign(score, e.score);
+        $("scorebug").classList.remove("flash"); void $("scorebug").offsetWidth; $("scorebug").classList.add("flash");
+      }
       if (interesting.has(e.type)) {
-        const extra = e.type === "shot" ? ` · xG ${e.xg} · ${e.outcome}` : e.type === "sprint" ? ` · ${e.speed_kmh} km/h`
+        const extra = e.type === "shot" ? ` · xG ${e.xg} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${e.speed_kmh} km/h`
           : e.type === "goal" ? ` · ${e.score.home}-${e.score.away}` : "";
-        feed.insertAdjacentHTML("afterbegin", `<div>${e.minute}' <span class="swatch" style="background:var(--${e.team})"></span>${esc(e.player)} ${e.type.toUpperCase()}${extra}</div>`);
+        feed.insertAdjacentHTML("afterbegin", `<div class="${e.type === "goal" ? "big" : ""}">${e.minute}' <span class="swatch" style="background:var(--${e.team === "away" ? "away" : "home"})"></span>${esc(e.player)} ${esc(e.type.toUpperCase())}${esc(extra)}</div>`);
       }
     }
-    drawMomentum(state.data.timeline, state.data.turning_point_minute, Math.min(45, minute - (minute % 5)));
-    await new Promise((r) => setTimeout(r, 90));
+    const shown = Math.min(minute, 45);
+    drawScorebug(score, minute > 45 ? "HT" : shown + "'", minute <= 45);
+    drawMomentum(d.timeline, d.turning_point_minute, Math.min(45, minute - (minute % 5)));
+    drawPitch(d.shots, d.teams, minute);
+    btn.textContent = minute > 45 ? "▶ Replay first half live" : `● Live ${shown}'`;
+    await sleep(110);
   }
-  drawMomentum(state.data.timeline, state.data.turning_point_minute);
-  btn.disabled = false;
+  drawScorebug(d.score, "HT", false);
+  drawMomentum(d.timeline, d.turning_point_minute);
+  drawPitch(d.shots, d.teams);
+  state.replaying = false;
+  btn.disabled = $("out").classList.contains("loading");
 }
 
 document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
   state.mode = b.dataset.mode; const fan = state.mode === "fan";
-  $("playerWrap").hidden = !fan; $("langWrap").hidden = !fan; load();
+  $("playerWrap").hidden = !fan; $("langWrap").hidden = !fan; stopTv(); load();
 }));
-$("focus").addEventListener("change", (e) => { state.focus = e.target.value; load(); });
+$("focus").addEventListener("change", (e) => { state.focus = e.target.value; stopTv(); load(); });
 $("player").addEventListener("change", (e) => { state.player = e.target.value; load(); });
 $("lang").addEventListener("change", (e) => { state.lang = e.target.value; load(); });
 $("replay").addEventListener("click", replay);
+$("tvPlay").addEventListener("click", playTv);
 load();
 </script>
 </body>
