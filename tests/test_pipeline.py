@@ -11,6 +11,7 @@ from halftime.agents import (
     check_grounded,
     coach_offline,
     explain_offline,
+    fan_offline,
     grounded_numbers,
     half_time_briefing,
     parse_json_reply,
@@ -354,3 +355,55 @@ def test_reply_without_evidence_or_with_repeated_changes_falls_back(match):
         "threat",
         "scoreline",
     }
+
+
+@pytest.mark.parametrize("seed", [2, 4, 5, 27])
+@pytest.mark.parametrize("focus", ["home", "away"])
+@pytest.mark.parametrize("mode", ["analyst", "fan"])
+def test_correct_replies_are_accepted(seed, focus, mode):
+    """A reply that copies the rule-based output, numbers and all, is valid
+    model output, so no step may reject it."""
+    m = generate_match(seed)
+    facts = metrics.half_time_facts(m)
+    findings = tactics_offline(facts, m, focus)
+    last = (
+        coach_offline(findings, facts, m, focus)
+        if mode == "analyst"
+        else fan_offline(findings, facts, focus, "Silva")
+    )
+    replies = [
+        findings,
+        explain_offline(findings, facts, focus),
+        last,
+    ]
+    client = ScriptedClient([json.dumps(r) for r in replies])
+    out = asyncio.run(
+        half_time_briefing(
+            m, mode=mode, focus=focus, player="Silva", client=client
+        )
+    )
+    rejected = [t for t in out["trace"] if t["backend"] == "offline-rules"]
+    assert not rejected
+
+
+def test_null_evidence_value_is_rejected(match):
+    findings, _, _ = _rules(match)
+    findings[0]["evidence"] = [{"label": "Pressure", "value": None}]
+    client = ScriptedClient([json.dumps(findings)] + ["no"] * 6)
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "offline-rules"
+
+
+def test_free_numbers_and_watch_targets_are_checked(match):
+    findings, explanations, changes = _rules(match)
+    findings[0]["title"] = "Riverside FC had 90 shots"
+    changes[0]["watch"] = (
+        "We conceded 999 shots; concede fewer after the break."
+    )
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "offline-rules"
+    assert _backends(out)["coach"] == "offline-rules"
+    assert "999" not in json.dumps(out["changes"])
