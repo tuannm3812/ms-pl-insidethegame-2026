@@ -7,7 +7,7 @@ from agent_framework import BaseChatClient, ChatResponse, Message
 from fastapi.testclient import TestClient
 
 from halftime import metrics
-from halftime.agents import half_time_briefing
+from halftime.agents import half_time_briefing, parse_json_reply
 from halftime.generator import generate_match, shot_xg
 from halftime.xt import grid
 
@@ -217,3 +217,16 @@ def test_key_based_foundry_client_from_env_file(tmp_path, monkeypatch):
             "AZURE_OPENAI_DEPLOYMENT",
         ):
             os.environ.pop(k, None)
+
+
+def test_parse_json_reply_ignores_prose_and_fences():
+    assert parse_json_reply(
+        'Here are the findings:\n[{"a": 1}]\nHope this helps.'
+    ) == [{"a": 1}]
+    assert parse_json_reply('```json\n{"b": [2, 3]}\n```') == {"b": [2, 3]}
+    assert parse_json_reply('Score [1-0] then {"c": true}') == {"c": True}
+    assert parse_json_reply(
+        'I found [3] key patterns.\n[{"id": "press"}]'
+    ) == [{"id": "press"}]
+    with pytest.raises(ValueError):
+        parse_json_reply("no json here")

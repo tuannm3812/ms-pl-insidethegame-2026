@@ -34,3 +34,16 @@ moved and each now ends with a newline. Not re-run against Foundry.
   `ruff format .` re-run.
 - Doc slots 1-4 (brief, architecture, decisions, next steps) are not written
   yet; `README.md` covers them for now.
+
+## 2026-10-18 · Claude · Merged the tactics JSON fix into the standards branch
+
+**Changed.** Merged `main` (tactics JSON fix, #2) into this branch, resolved
+the conflict in `halftime/agents.py` by keeping #2's logic, and re-ran
+`ruff format`. Gave `parse_json_reply` a Google-style docstring.
+
+**Verified.** Ruff checks pass; `pytest`: 12 passed (11 plus #2's new
+parser test). Offline briefings are identical to `main` at `c16997b` for
+the same 40 cases as the previous entry.
+
+**Open.** Supersedes the open item about `fix-tactics-json` in the previous
+entry; that is resolved.
