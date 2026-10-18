@@ -700,3 +700,19 @@ result. No console errors besides the missing favicon. `ruff format
 
 **Not verified.** Not run against the live Foundry backend, so the model
 backend label shows the client class name as `/api/health` reports it.
+
+## 2026-10-18 · Claude · New typeface and palette (PR #7)
+
+**Changed.** At Mike's request, `static/index.html` now uses Barlow for body
+text and Barlow Condensed for headings, the scorebug, numbers and overlay
+graphics, loaded from Google Fonts with a system-font fallback if the
+fonts cannot load. New palette in both themes: deep purple for the
+scorebug, buttons and badges, a green highlight (HT clock, section marks,
+overlay captions), and cyan for the home side and magenta for the away side
+instead of blue and orange (cyan and magenta stay distinct for the common
+colour-vision deficiencies; inferred, not tested with a simulator). The
+screenshots in `docs/` are refreshed.
+
+**Verified.** Headless Chromium on seed 27 in light and dark mode and at
+390 px (no horizontal scroll); `ruff format --check`, `ruff check` and
+`pytest` green.
