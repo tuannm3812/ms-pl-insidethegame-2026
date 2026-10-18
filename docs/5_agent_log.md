@@ -614,3 +614,54 @@ both focus teams, as Codex asked. No checks were relaxed.
 **Not verified.** One run per focus team on one seed, so this shows the fix
 works, not a fallback rate. The exact field the model got wrong before the
 fix is still unknown, because the old reason did not name it.
+
+## 2026-10-19 · Codex · Review of Claude's live verification, pass 5
+
+**Scope.** Checked the merged PR #5 and Claude's new
+[PR #6](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/6),
+`Log the live coach check after PR #5`, against the agent-log and evidence
+requirements in `AGENTS.md` and `docs/0_coding_standards.md`. Reviewed PR #6
+at `c80f4fa6e4906189bfc894e54982889ef5cfbd74`, based on
+`5e2211f41b975787bb824423e08fcfb75cca036c`. The local checkout was clean.
+
+**Result.** No actionable findings. PR #6 is an append-only documentation
+change: one file, 27 added lines, no deletions or application changes.
+Its new Claude entry records the live evidence requested by pass 4 and
+states the sample-size and historical-diagnosis limits.
+
+**Verified directly in this review.**
+
+- GitHub reports PR #5 as merged. Local `main` is its merge commit
+  `5e2211f`. Comparing this checkout with the previously reviewed
+  `7f6c3b3` shows only the added pass 4 log entry; application and test
+  code are identical to the reviewed version.
+- Read PR #6's actual diff: the new entry identifies deployed revision
+  `halftime-briefing--0000004`, image `main-5e2211f`, seed 27, analyst
+  mode, gpt-4.1-mini and both focus teams. It records tactics, explainer
+  and coach using the model with empty rejection notes, taking 11.6 s
+  for home focus and 10.3 s for away focus.
+- GitHub reports both `test` and `docker` CI jobs successful for PR #6,
+  and the main-branch CI run for `5e2211f` successful. These are remote CI
+  results, not a new local test or container run. The documentation-only
+  delta does not justify rerunning the unchanged test suite here.
+
+**Evidence distinction.** Deployment identity, endpoint health, model
+backends and timings above are Claude's recorded observations. This review
+verified what the entry reports and its consistency with the reviewed code;
+it did not independently query Azure, replay the requests, or inspect raw
+response artifacts. The entry provides the requested author-recorded live
+confirmation for those two cases. It does not establish a general fallback
+rate, explain the precise malformed field in the old reply, or prove
+success for other seeds, languages or later deployments.
+
+**Discussion.** The outstanding pass 4 request is satisfied by the supplied
+record for seed 27 and both focus teams; do not keep treating live coach
+acceptance as wholly untested. Preserve the narrower conclusion: the coach
+was observed using the model after the prompt fix in two analyst runs.
+The pre-fix root cause remains inferred. Future demo checks should continue
+retaining the per-stage backend and rejection note, because endpoint health
+alone cannot distinguish model use from a successful fallback.
+
+**Limits.** No source fixes, live model calls, redeploy, merge, GitHub
+comments, commit or push were performed by this review. Only this local
+review entry was appended; earlier entries remain unchanged.
