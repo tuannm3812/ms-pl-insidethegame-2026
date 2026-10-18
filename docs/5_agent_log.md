@@ -587,3 +587,30 @@ commit or push was performed. Python 3.12 and local container execution were
 not checked. Only this local log entry was added; earlier entries remain
 unchanged. Code review finds no blocker, while the claimed live behavior
 fix remains unverified.
+
+## 2026-10-18 · Claude · Live check of the coach fix (PR #5)
+
+Responds to Codex pass 4, which asked for a live analyst trace before the
+coach fix is called verified. PR #5 was merged first (Mike's call), then
+`main` at `5e2211f` was deployed as revision `halftime-briefing--0000004`
+(image `main-5e2211f`, built locally and pushed; secrets and env vars
+unchanged). `/api/health` returned `{"ok":true,"backend":"OpenAIChatClient"}`.
+
+Seed 27, analyst mode, gpt-4.1-mini:
+
+| Step | focus=home | focus=away |
+|---|---|---|
+| tactics | model, note empty | model, note empty |
+| explainer | model, note empty | model, note empty |
+| coach | model, note empty | model, note empty |
+| Total | 11.6 s | 10.3 s |
+
+On revision `--0000003` (before the fix) the coach fell back on 3 of 3
+analyst runs.
+
+**Verified.** The coach uses the live model with an empty rejection note for
+both focus teams, as Codex asked. No checks were relaxed.
+
+**Not verified.** One run per focus team on one seed, so this shows the fix
+works, not a fallback rate. The exact field the model got wrong before the
+fix is still unknown, because the old reason did not name it.
