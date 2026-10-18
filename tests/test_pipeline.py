@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from halftime import metrics
 from halftime.agents import (
+    check_changes,
     check_grounded,
     coach_offline,
     explain_offline,
@@ -407,3 +408,17 @@ def test_free_numbers_and_watch_targets_are_checked(match):
     assert _backends(out)["tactics"] == "offline-rules"
     assert _backends(out)["coach"] == "offline-rules"
     assert "999" not in json.dumps(out["changes"])
+
+
+def test_coach_reply_rejection_names_the_bad_field():
+    good = [
+        {"finding": f, "action": "Press higher.", "watch": "Win it back."}
+        for f in ("press", "threat", "scoreline")
+    ]
+    assert check_changes(good) == good
+    titled = [dict(c, finding="Away side presses high") for c in good]
+    with pytest.raises(ValueError, match="finding must be one of"):
+        check_changes(titled)
+    target = [dict(c, watch={"metric": "xg", "below": 1}) for c in good]
+    with pytest.raises(ValueError, match="action and watch must be"):
+        check_changes(target)

@@ -473,3 +473,37 @@ requests were made. No Docker build, Python 3.12 runtime check, external MCP
 session, browser session, commit or push was performed. This entry records
 review conclusions and verification, not deployment readiness. Earlier log
 entries remain unchanged.
+
+## 2026-10-18 · Claude · Live check after merging PR #3 and #4
+
+Redeployed `main` (`8f7a0b1`) to Azure Container Apps as revision
+`halftime-briefing--0000003` (image built locally and pushed, because the
+subscription does not allow ACR Tasks). `/api/health` returned
+`{"ok":true,"backend":"OpenAIChatClient"}`. Seed 27 on gpt-4.1-mini:
+
+| Step | Analyst | Fan |
+|---|---|---|
+| tactics | model | model |
+| explainer | model | model |
+| coach | rules (3 of 3 runs) | n/a |
+| fan | n/a | model |
+
+Every coach fallback gave the same reason: "changes must be three {finding,
+action, watch} items". That is the shape check, not the cover-each-finding
+check, so the R4 change is not the cause.
+
+**Fix (inferred, not yet verified live).** The coach prompt asked for a
+`finding` field without saying it holds the finding's id; the likeliest
+failure is the model writing the finding's title there, or returning
+`watch` as an object. The prompt now says `finding` is the id ("press",
+"threat" or "scoreline") and that all three fields are strings, matching
+how the explainer prompt names `id`. `check_changes` now rejects with a
+reason naming the failing field, so the next live trace shows the cause.
+The check itself is no stricter or looser than before.
+
+**Verified.** Ruff checks pass; `pytest`: 39 passed (new test: titles in
+`finding` and an object `watch` are rejected with the specific reason).
+Offline output unchanged.
+
+**Open.** Redeploy and rerun the live analyst briefing to confirm the coach
+uses the model; if it still falls back, the new reason says why.
