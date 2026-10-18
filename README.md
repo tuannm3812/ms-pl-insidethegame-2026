@@ -28,7 +28,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 
 - **Every number comes from code.** The model-backed agents only explain and decide, so they cannot invent a stat.
 - **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach and fan. The tactics agent also gets the metric functions as tools.
-- **Backend:** Microsoft Foundry when `FOUNDRY_PROJECT_ENDPOINT` and `FOUNDRY_MODEL` are set. Otherwise any OpenAI or Azure OpenAI endpoint (`OPENAI_API_KEY`, or `AZURE_OPENAI_ENDPOINT` with `AZURE_OPENAI_API_KEY`).
+- **Backend:** a model in Microsoft Foundry, configured in `.env` either keyless (`FOUNDRY_PROJECT_ENDPOINT` + `FOUNDRY_MODEL`, Entra ID sign-in) or with a key (`AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_DEPLOYMENT`). Plain OpenAI (`OPENAI_API_KEY`) also works.
 - **No model configured:** each agent falls back to a rule-based version with the same output shape, so the demo always runs. The same fallback catches a model reply that can't be parsed.
 - **MCP:** `halftime/mcp_server.py` exposes the same tools over MCP, so GitHub Copilot agent mode or a Foundry agent can query the match directly.
 
@@ -41,12 +41,12 @@ python -m pytest -q               # 10 tests
 python -m halftime.mcp_server     # MCP server over stdio
 ```
 
-Optional, to use Foundry (sign in with `az login` first):
+To connect a model in Microsoft Foundry, copy `.env.example` to `.env` and fill in one of the two options. `.env` is git-ignored and kept out of the Docker image.
 
-```bash
-export FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<name>
-export FOUNDRY_MODEL=<deployment-name>
-```
+- **Key-based:** your deployment's endpoint, API key and deployment name.
+- **Keyless:** your project endpoint and deployment name, signed in with `az login`.
+
+The page header shows which backend is active.
 
 ## Deploy to Azure Container Apps
 
