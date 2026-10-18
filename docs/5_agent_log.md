@@ -401,3 +401,189 @@ cases.
 
 **Not verified.** Still no live Foundry run; acceptance and fallback rates
 with a real model are unknown.
+
+## 2026-10-19 · Codex · Review of Claude's fixes, pass 3
+
+**Scope.** Reviewed `8335b1d..143928a`, covering the evidence and change
+validators, number filter, expanded model inputs, coach targets, page
+renderer, regression tests and documentation. Checked against the current
+project standard and the previously read master standard. An independent
+reviewer also checked the agent changes. The working tree was clean before
+this append; no application or test files were changed by this pass.
+
+**Result.** No new actionable findings in the reviewed diff. The four
+specific pass 2 failures are now resolved, with the number filter's broader
+limitations explicitly retained rather than treated as a guarantee.
+
+| Pass 2 finding | Verified disposition |
+|---|---|
+| R1: null evidence crashes rendering | Closed. `halftime/agents.py:263-270` rejects null/missing evidence values. The pipeline falls back for the original null-value reply. `static/index.html:260-265` independently renders unavailable values as `n/a`. |
+| R2: free 90 and unchecked watch fields | Reported bypasses closed. `halftime/agents.py:246` removes 90 from the free-number list; `halftime/agents.py:1246-1248` and `halftime/agents.py:1266-1268` no longer exempt coach/fan watch fields. The original 90-shot title and both coach/fan 999-shot watch claims now fall back. |
+| R3: correct scoreline gaps rejected | Closed for the reported cases. `halftime/agents.py:1182-1185` includes the computed gap fields in tactics measurements. Correct replies for seeds 2, 4 and 5, away focus, are accepted along with the wider matrix below. |
+| R4: repeated coach references accepted | Closed. `halftime/agents.py:353-356` requires all three finding IDs. Three press-only changes trigger fallback and are replaced by one change per finding. |
+
+The R4 fix was committed in `28cfd83`, after the snapshot examined in pass 2.
+Its presence now is consistent with that earlier review of `8335b1d`.
+
+**Verification.**
+
+- `.venv/bin/python -m pytest -q`: **38 passed in 1.32 s**, Python 3.15.0.
+  Inspected the added tests at `tests/test_pipeline.py:335`,
+  `tests/test_pipeline.py:363`, `tests/test_pipeline.py:389` and
+  `tests/test_pipeline.py:397`; they cover missing evidence, repeated
+  changes, accepted canonical replies, null values and the numeric probes.
+- Ruff **0.16.8**, using the cached binary matching the dev requirement:
+  `ruff format --check .` reported **13 files already formatted**;
+  `ruff check .` reported **All checks passed**.
+- Independently ran **32 scripted model cases**: seeds 2, 4, 5, 27, 3, 11,
+  42 and 99, both focus teams and both modes. Supplied full rule-based
+  findings, explanations and coach/fan responses through the real Agent
+  Framework, retaining their numeric text. Every model-backed stage was
+  accepted; none silently fell back.
+- Compared **40 offline briefings** with `28cfd83`: seeds 27, 3, 11, 42 and
+  99, both focus teams, both modes, with and without a favourite player.
+  Outputs were identical after excluding the timing trace. This verifies
+  Claude's reported preservation of offline output for those cases.
+- Re-ran five adversarial pipeline probes individually: null evidence,
+  `Riverside FC had 90 shots`, the coach watch with a historical 999-shot
+  claim, three repeated press references, and a fan watch with 999 shots.
+  Each was rejected at the intended stage and produced an explanatory
+  `offline-rules` trace.
+- Executed the current `evidenceChips` function in Node: null scalar values,
+  missing values, unavailable before/after values and a null map entry all
+  render `n/a`. Also verified before/after text is HTML-escaped. These are
+  renderer function checks, not a full browser session.
+
+**Discussion.** Keep these fixes. The expanded measurements and code-owned
+coach targets address missing input directly, and the canonical-response
+matrix now verifies acceptance as well as fallback. README and the standard
+correctly acknowledge that scalar membership cannot establish the right
+team, metric or window (`README.md:29`, `docs/0_coding_standards.md:59`). The
+remaining small free-number list is visible in the code; this review does
+not claim that arbitrary invented statistics are impossible. That broader
+limitation is already documented and is not re-raised as a new regression.
+
+The next useful evidence is an explicitly scoped live Foundry check that
+retains the per-stage backend and rejection notes for analyst and fan modes.
+The scripted runs prove the contracts for these inputs, not real-model
+acceptance rates, translation quality or narrative correctness.
+
+**Limits.** This pass used offline and scripted clients only; no live model
+requests were made. No Docker build, Python 3.12 runtime check, external MCP
+session, browser session, commit or push was performed. This entry records
+review conclusions and verification, not deployment readiness. Earlier log
+entries remain unchanged.
+
+## 2026-10-18 · Claude · Live check after merging PR #3 and #4
+
+Redeployed `main` (`8f7a0b1`) to Azure Container Apps as revision
+`halftime-briefing--0000003` (image built locally and pushed, because the
+subscription does not allow ACR Tasks). `/api/health` returned
+`{"ok":true,"backend":"OpenAIChatClient"}`. Seed 27 on gpt-4.1-mini:
+
+| Step | Analyst | Fan |
+|---|---|---|
+| tactics | model | model |
+| explainer | model | model |
+| coach | rules (3 of 3 runs) | n/a |
+| fan | n/a | model |
+
+Every coach fallback gave the same reason: "changes must be three {finding,
+action, watch} items". That is the shape check, not the cover-each-finding
+check, so the R4 change is not the cause.
+
+**Fix (inferred, not yet verified live).** The coach prompt asked for a
+`finding` field without saying it holds the finding's id; the likeliest
+failure is the model writing the finding's title there, or returning
+`watch` as an object. The prompt now says `finding` is the id ("press",
+"threat" or "scoreline") and that all three fields are strings, matching
+how the explainer prompt names `id`. `check_changes` now rejects with a
+reason naming the failing field, so the next live trace shows the cause.
+The check itself is no stricter or looser than before.
+
+**Verified.** Ruff checks pass; `pytest`: 39 passed (new test: titles in
+`finding` and an object `watch` are rejected with the specific reason).
+Offline output unchanged.
+
+**Open.** Redeploy and rerun the live analyst briefing to confirm the coach
+uses the model; if it still falls back, the new reason says why.
+
+## 2026-10-19 · Codex · PR #5 review against AGENTS.md, pass 4
+
+**Scope.** Reviewed [PR #5](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/5),
+base `8f7a0b1ecf4323bddd5198374d60823dda7e91e8` to head
+`7f6c3b3a1d2c4dfd2d14a214afedafc746c311db`, against `AGENTS.md`,
+`docs/0_coding_standards.md` and the previously read master standard.
+Fetched the PR into a separate review ref and tested an archived snapshot
+under `/private/tmp`, leaving the main checkout unchanged apart from this
+log append. An independent reviewer inspected the same diff and standards.
+The PR also carries the earlier pass 3 log entry; this pass reviews its new
+coach fix and supporting evidence rather than repeating that review.
+
+**Result.** No actionable findings or blocking standards violations in the
+reviewed diff. The prompt change is consistent with the existing output
+contract, and the validator refactor preserves its acceptance rules.
+
+**Checked.** File/line references below refer to the PR head.
+
+- `halftime/agents.py:1067-1077`: the coach prompt now explicitly requires
+  `finding` to be `press`, `threat` or `scoreline`, and `finding`, `action`
+  and `watch` to be strings. This matches the validator and the existing
+  input payload, retains code-owned targets, and preserves the prohibition
+  on inventing statistics.
+- `halftime/agents.py:339-358`: rejection notes distinguish list length,
+  item type, finding reference, text fields and missing finding coverage.
+  Existing fallback and numeric-filter boundaries remain unchanged. Action
+  and watch still share one text-field diagnostic; it narrows the failure
+  but does not identify which of those two fields failed.
+- `tests/test_pipeline.py:413-424`: the new test accepts a valid reply and
+  checks specific rejection reasons for a title-valued finding and an
+  object-valued watch. It tests validation and diagnostics, not whether a
+  real model follows the revised prompt.
+- README updates the test count to 39. The PR only appends to the agent
+  log and explicitly labels the proposed live root cause as inferred.
+
+**Verified.**
+
+- Exact PR snapshot: `.venv/bin/python -m pytest -q`, using the existing
+  environment's absolute interpreter path: **39 passed in 0.95 s**,
+  Python 3.15.0. The API test replaces the configured client before requests;
+  no live model requests were made by this review.
+- Ruff **0.16.8**: format check reported **13 files already formatted**;
+  lint reported **All checks passed**. `git diff --check` also passed for
+  the PR range.
+- Compared old and new `check_changes` on **577 JSON-shaped cases**,
+  including valid output, wrong lengths/types, missing/invalid references,
+  repeated IDs, blank text and object-valued fields. Acceptance/rejection
+  matched in every case. This supports the PR's statement that its checks
+  are no stricter or looser for those inputs.
+- Compared **40 offline briefings** with the PR base: seeds 27, 3, 11, 42
+  and 99, both focus teams, both modes, with and without a favourite player.
+  Output was identical after excluding the timing trace.
+- Read GitHub's current PR metadata and rechecked the head SHA after local
+  verification. The PR remained open at the reviewed SHA; both CI jobs,
+  `test` and `docker`, reported **SUCCESS**. Those are GitHub-reported
+  results, not a local Docker build by this pass.
+
+**Discussion / live evidence still needed.** The PR log reports revision
+`halftime-briefing--0000003` as healthy with tactics/explainer/fan using the
+model, while coach fell back on all three analyst runs. This is the author's
+record, not a deployment observation independently repeated here. The old
+aggregate shape error cannot establish whether the actual bad value was a
+finding title, an object-valued watch, or another rejected shape. The prompt
+clarification is a reasonable fix for the inferred mismatch, and the better
+diagnostics will make the next failure more useful; neither proves live
+coach acceptance yet.
+
+After deploying this exact head, retain at least one analyst briefing's
+per-stage trace (preferably both focus teams) and confirm the coach stage
+uses the model with an empty rejection note. A healthy endpoint or HTTP 200
+alone does not prove that. If it still falls back, use the new reason to
+identify the failing field before changing the prompt or validator again.
+Do not relax numeric or shape checks to make the backend label look green.
+
+**Limits.** No live model call, redeploy, merge, GitHub review/comment,
+commit or push was performed. Python 3.12 and local container execution were
+not checked. Only this local log entry was added; earlier entries remain
+unchanged. Code review finds no blocker, while the claimed live behavior
+fix remains unverified.

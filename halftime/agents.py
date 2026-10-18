@@ -339,17 +339,18 @@ def check_explanations(explanations: Any) -> list[dict]:
 def check_changes(changes: Any) -> list[dict]:
     """Reject coach output that is not three changes, one per finding."""
     _require(isinstance(changes, list), "changes must be a list")
-    _require(
-        len(changes) == 3
-        and all(
-            isinstance(c, dict)
-            and c.get("finding") in FINDING_IDS
-            and _is_text(c.get("action"))
-            and _is_text(c.get("watch"))
-            for c in changes
-        ),
-        "changes must be three {finding, action, watch} items",
-    )
+    _require(len(changes) == 3, "changes must be three items")
+    for c in changes:
+        _require(isinstance(c, dict), "each change must be an object")
+        # Name the bad field so a live fallback in the trace is diagnosable.
+        _require(
+            c.get("finding") in FINDING_IDS,
+            f"change finding must be one of {FINDING_IDS}",
+        )
+        _require(
+            _is_text(c.get("action")) and _is_text(c.get("watch")),
+            "change action and watch must be non-empty text",
+        )
     _require(
         {c["finding"] for c in changes} == set(FINDING_IDS),
         "changes must cover each finding once",
@@ -1068,9 +1069,11 @@ You are the assistant coach writing the half-time briefing for the focus team.
 Turn the findings into exactly three changes for the second half, one per
 finding. Each change names real players from the squad list and is something a
 coach can say in the dressing room. Return a JSON list of {finding, action,
-watch}, where watch is one measurable target for the second half, taken
-from "targets". Quote numbers only as they appear in the input; never
-calculate or invent one. A reply with any other number is discarded.
+watch}, all three strings. finding is the id of the finding the change
+answers ("press", "threat" or "scoreline"), not its title. watch is one
+sentence naming a measurable target for the second half, taken from
+"targets". Quote numbers only as they appear in the input; never calculate or
+invent one. A reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
