@@ -115,7 +115,7 @@ def test_key_based_foundry_client_from_env_file(tmp_path, monkeypatch):
               "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT", "OPENAI_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     (tmp_path / ".env").write_text("AZURE_OPENAI_ENDPOINT=https://res.openai.azure.com/openai/v1/\n"
-                                   "AZURE_OPENAI_API_KEY='abc'\nAZURE_OPENAI_DEPLOYMENT=my-gpt\n")
+                                   "export AZURE_OPENAI_API_KEY='abc'\nAZURE_OPENAI_DEPLOYMENT=my-gpt\n")
     monkeypatch.chdir(tmp_path)
     try:
         client = make_client()
