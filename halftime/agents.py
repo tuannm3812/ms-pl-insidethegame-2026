@@ -131,12 +131,27 @@ async def _run_agent(client, name: str, instructions: str, payload: dict, tools=
 
     agent = Agent(client, instructions=instructions + "\n\nReply with JSON only, no prose around it.",
                   name=name, tools=tools)
-    resp = await agent.run(json.dumps(payload, default=str))
-    text = resp.text.strip()
+    message = json.dumps(payload, default=str)
+    try:
+        return parse_json_reply((await agent.run(message)).text)
+    except ValueError:  # one retry: models sometimes wrap the JSON in prose
+        return parse_json_reply((await agent.run(message)).text)
+
+
+def parse_json_reply(text: str) -> Any:
+    """First JSON object or array in a model reply, ignoring fences and prose."""
+    text = (text or "").strip()
     m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
     if m:
-        text = m.group(1)
-    return json.loads(text)
+        text = m.group(1).strip()
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch in "[{":
+            try:
+                return decoder.raw_decode(text, i)[0]
+            except json.JSONDecodeError:
+                continue
+    raise ValueError(f"no JSON in model reply: {text[:80]!r}")
 
 
 # ---------------------------------------------------------------------------
