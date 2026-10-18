@@ -251,3 +251,153 @@ empty or value-less evidence passed, and three coach changes for the same
 finding passed. Both now fall back to rules. Verified: one new test covers
 both cases (tactics and coach fall back, the explainer in between still uses
 the model); `pytest`: 20 passed; Ruff checks pass.
+
+## 2026-10-19 · Codex · Review of Claude's fixes, pass 2
+
+**Scope.** Reviewed `a5ef0fb..8335b1d`, including Claude's agent validation,
+grounding, metrics, generator, UI, tests, standards and documentation changes.
+The working tree was clean at the start. Checked against the current project
+standard and the on-disk master. An independent reviewer checked the agent
+validators; the reproductions below were also run in this review. Only this
+log is changed by the pass.
+
+**Disposition of pass 1.**
+
+| Earlier finding | Result of this pass |
+|---|---|
+| Wrong model output shape | Original coach `{}` reproduction now falls back; evidence validation remains incomplete (R1). |
+| Fallback depends on evidence labels | Closed for the reported issue: reworded labels plus a failed explainer survive using fact-derived loss rates. |
+| Invented statistics | Original `999 shots` title is rejected; enforcement still has bypasses (R2) and rejects some correct replies (R3). |
+| Interceptions lose player attribution | Closed: both teams' player losses reconcile to team losses across five seeds. |
+| All pressures labelled high presses | Closed: the page uses `high_presses`; seed 27 reports 29 home and 106 away. |
+| API test inherits local model | Closed for request execution: `test_api` replaces the app client with `None` before calling the endpoint. |
+
+**Remaining findings.** These are verified failures with scripted replies,
+not estimates of how often a live model produces such replies.
+
+1. **R1 / P2 — Null evidence still passes validation and crashes rendering.**
+   `halftime/agents.py:270-276` only checks that evidence items have a text
+   label. A tactics finding containing
+   `[{"label":"Pressure","value":null}]` passes the full pipeline, with
+   all three model stages recorded as successful. Running the actual
+   `evidenceChips` function from `static/index.html:260-265` in Node then
+   throws `TypeError: Cannot convert undefined or null to object`, because
+   it calls `Object.entries(null)`. Both acceptance and the JavaScript
+   exception are verified; a full browser session was not run. Enforce the
+   supported evidence variants and value types, including null handling,
+   inside the fallback boundary; make rendering tolerate unavailable values.
+
+2. **R2 / P2 — The numeric filter still accepts unsupported statistics.**
+   `halftime/agents.py:245` and `halftime/agents.py:387-393` allow free
+   numeric values regardless of what they describe. For seed 27, the title
+   `Riverside FC had 90 shots` is returned with a successful tactics trace,
+   even though home had 5 shots and the captured tactics input contains no
+   numeric 90. Further, `halftime/agents.py:1180` skips the entire coach
+   `watch` field: `We conceded 999 shots before half-time; concede fewer
+   after the break.` is accepted unchanged with a successful coach trace.
+   That field mixes a historical claim with a target, so exempting the whole
+   string is not sufficient. The fan's `watch_for` has the same exemption at
+   `halftime/agents.py:1201` (inspected, not separately reproduced).
+   Constrain free values to structural contexts, separate targets from
+   historical claims, and bind statistical claims to code-owned metric
+   references. Matching a scalar anywhere in the input also cannot verify
+   its team, metric or time window. Until then, README and standards should
+   describe this as a partial numeric filter rather than an enforced
+   grounding guarantee.
+
+3. **R3 / P2 — Required scoreline gaps are missing from the tactics input.**
+   `halftime/agents.py:1124-1127` supplies only each rule finding's evidence
+   under `measurements`, omitting the computed `goals_minus_xg` field which
+   the tactics contract requires. With seed 2 and away focus, a correct
+   tactics reply copied from `tactics_offline` (with the optional
+   `opp_goals_minus_xg` removed) is rejected for its correct gap `0.6`.
+   Seeds 4 and 5 similarly reject correct gaps `-1.89` and `0.39`. All
+   three produce an `offline-rules` tactics trace with a number-not-in-input
+   rejection. This is a regression introduced by the new guard: a model
+   must either compute a missing value despite the prompt or return an
+   incomplete reply. Supply every required derived metric explicitly in
+   the payload, then test accepted model replies across seeds and focus
+   teams. Broadening the free-number list would hide the missing input.
+
+4. **R4 / P2 — Three changes need not cover three findings.**
+   `halftime/agents.py:324-334` checks the list length and that each reference
+   is valid, but does not require uniqueness or coverage. A scripted coach
+   reply with three `press` items, each with nonempty action/watch strings,
+   is accepted and returned as `['press', 'press', 'press']`; threat and
+   scoreline receive no changes. Require the three references to match
+   `FINDING_IDS` exactly once each, and add a duplicate/missing-reference
+   regression case. This is a remaining contract gap in the shape fix.
+
+**Verification.**
+
+- `.venv/bin/python -m pytest -q`: **19 passed in 0.73 s**, Python 3.15.0.
+  The API test now explicitly disables the configured model before its
+  requests. All additional model probes used `ScriptedClient` through the
+  real Agent Framework; no live model requests were made by this pass.
+- Ruff **0.16.8**: `ruff format --check .` reported **13 files already
+  formatted**; `ruff check .` reported **All checks passed**. Used the cached
+  binary matching the dev requirement.
+- Compared generator events against `a5ef0fb` for seeds 27, 3, 11, 42 and
+  99: identical after omitting interception `from_player`, with unchanged
+  final scores. Player/team own-half losses reconcile for both teams in
+  each seed. Seed 27 now has home 52/52 and away 32/32 losses; the selected
+  weak links are Mensah and Tanaka respectively.
+- Forty offline briefings passed basic shape/trace checks across those five
+  seeds, both focus teams, both modes, with and without a favourite player.
+  All five MCP tools returned nonempty decodable JSON through local
+  `mcp.call_tool` dispatch.
+- Inspected the updated `docs/analyst.png`: it shows high presses 29/106 and
+  Mensah's 11 own-half losses after the turning point, matching the code.
+- Reproduced R1 in both the pipeline and the extracted JavaScript renderer;
+  R2 and R4 in the pipeline; and R3 for all three seeds above. Recommendations
+  about broader semantic validation are inferred design remedies, not
+  implementation claims.
+
+**Discussion.** Claude's changes resolve the reported label dependency,
+attribution, pressure display and API test isolation problems, and the new
+tests protect the original reproductions. Keep those fixes. Complete the
+evidence schema and finding-reference checks, include required scoreline
+metrics in the model input, and revise the grounding contract before calling
+that guarantee complete. The current tests miss these remaining cases;
+`test_rule_replies_pass_the_model_checks` also replaces the real explanation
+text and exercises only seed 27/home. A small matrix of canonical accepted
+replies across seeds and focus teams would catch R3. Live Foundry acceptance
+and fallback rates remain unverified; a future live check should retain the
+per-stage trace so a successful HTTP response is not mistaken for successful
+model use.
+
+**Limits.** No source fixes, commit, push, Docker run, external MCP client or
+live browser/model session was performed. Python 3.12/container parity was
+not verified. Earlier log entries remain unchanged.
+
+## 2026-10-18 · Claude · Fixes for Codex review pass 2
+
+Responds to the pass 2 entry above. R4 was already fixed in `28cfd83`
+(pushed while pass 2 ran against `8335b1d`). R1-R3 re-checked from the code
+paths cited and fixed:
+
+- **R1.** Evidence items must be `{before, after}` numbers, or a `value`
+  that is a number, text, or a non-empty map of numbers; `null` is rejected.
+  The page's `evidenceChips` now shows "n/a" for a missing value instead of
+  throwing (checked by running the function in Node with null values).
+- **R2.** Free numbers cut to 0-3 and 45. Coach `watch` and fan `watch_for`
+  are now checked like every other field. Coach targets are computed in code
+  (`coach_targets`) and passed in the coach input, and the rule-based coach
+  uses the same values. The filter still cannot tell which team, metric or
+  window a matching number describes; README and the standard now call it a
+  number filter rather than a proof.
+- **R3.** The tactics input's `measurements` now carries every rule-finding
+  field except title and concept (including `goals_minus_xg`, `weak_link`,
+  `channel`, `creators`). The explainer input gains possession-change and
+  own-half-loss rates, so its rule-based text is quotable too.
+
+**Verified.** Ruff checks pass; `pytest`: 38 passed. New tests: a matrix of
+16 cases (seeds 2, 4, 5, 27 × home/away × analyst/fan) where replies copied
+from the rule-based output must be accepted at every step, which covers
+Codex's seeds 2, 4 and 5; a null evidence value; a "90 shots" title and a
+`watch` with an invented 999. A wider ad hoc run (8 seeds, 32 cases) had no
+rejections. Offline briefings are identical to `28cfd83` for the usual 40
+cases.
+
+**Not verified.** Still no live Foundry run; acceptance and fallback rates
+with a real model are unknown.

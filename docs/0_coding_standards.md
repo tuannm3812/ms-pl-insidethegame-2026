@@ -56,9 +56,11 @@ breaks the demo or the pitch.
 1. **Numbers come from code.** Every statistic in a briefing is computed in
    `halftime/metrics.py` (or `xt.py`) and passed to the agents. Model-backed
    agents explain and decide; they never compute or invent a number.
-   `check_grounded` enforces this: a reply quoting a number that is not in
-   the agent's input or tool results is discarded. New numbers a model needs
-   go into its input from code, never into the prompt as a request.
+   `check_grounded` filters for this: a reply quoting a number that is not
+   in the agent's input or tool results is discarded. It cannot tell which
+   team, metric or window a matching number describes, so do not describe
+   it as a guarantee. New numbers a model needs, targets included, go into
+   its input from code, never into the prompt as a request.
 2. **Same shape, model or not.** Each model-backed agent (tactics,
    explainer, coach, fan) has a rule-based `*_offline` fallback returning the
    same JSON shape. A model reply that cannot be parsed, or fails its
