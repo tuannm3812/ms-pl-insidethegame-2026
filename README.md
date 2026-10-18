@@ -60,12 +60,12 @@ az containerapp up -n halftime-briefing -g rg-insidethegame -l eastus \
   --env-vars FOUNDRY_PROJECT_ENDPOINT=<endpoint> FOUNDRY_MODEL=<deployment>
 ```
 
-The app signs in to Foundry with `DefaultAzureCredential`, so in Azure it uses the container app's managed identity. No keys are stored. Give that identity access to the Foundry project:
+The app signs in to Foundry with `DefaultAzureCredential`, so in Azure it uses the container app's managed identity. No keys are stored. Give that identity the **Foundry User** role (formerly Azure AI User). Use the role ID, because Microsoft recommends the ID while the role rename rolls out:
 
 ```bash
 az containerapp identity assign -n halftime-briefing -g rg-insidethegame --system-assigned
 az role assignment create --assignee <principalId from the previous command> \
-  --role "Azure AI User" --scope <Foundry project resource id>
+  --role 53ca6127-db72-4b80-b1b0-d745d6d5456d --scope <Foundry resource id>
 ```
 
 Without the two `FOUNDRY_*` variables, the deployed app still works using the rule-based agents.
