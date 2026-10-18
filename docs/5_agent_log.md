@@ -401,3 +401,75 @@ cases.
 
 **Not verified.** Still no live Foundry run; acceptance and fallback rates
 with a real model are unknown.
+
+## 2026-10-19 · Codex · Review of Claude's fixes, pass 3
+
+**Scope.** Reviewed `8335b1d..143928a`, covering the evidence and change
+validators, number filter, expanded model inputs, coach targets, page
+renderer, regression tests and documentation. Checked against the current
+project standard and the previously read master standard. An independent
+reviewer also checked the agent changes. The working tree was clean before
+this append; no application or test files were changed by this pass.
+
+**Result.** No new actionable findings in the reviewed diff. The four
+specific pass 2 failures are now resolved, with the number filter's broader
+limitations explicitly retained rather than treated as a guarantee.
+
+| Pass 2 finding | Verified disposition |
+|---|---|
+| R1: null evidence crashes rendering | Closed. `halftime/agents.py:263-270` rejects null/missing evidence values. The pipeline falls back for the original null-value reply. `static/index.html:260-265` independently renders unavailable values as `n/a`. |
+| R2: free 90 and unchecked watch fields | Reported bypasses closed. `halftime/agents.py:246` removes 90 from the free-number list; `halftime/agents.py:1246-1248` and `halftime/agents.py:1266-1268` no longer exempt coach/fan watch fields. The original 90-shot title and both coach/fan 999-shot watch claims now fall back. |
+| R3: correct scoreline gaps rejected | Closed for the reported cases. `halftime/agents.py:1182-1185` includes the computed gap fields in tactics measurements. Correct replies for seeds 2, 4 and 5, away focus, are accepted along with the wider matrix below. |
+| R4: repeated coach references accepted | Closed. `halftime/agents.py:353-356` requires all three finding IDs. Three press-only changes trigger fallback and are replaced by one change per finding. |
+
+The R4 fix was committed in `28cfd83`, after the snapshot examined in pass 2.
+Its presence now is consistent with that earlier review of `8335b1d`.
+
+**Verification.**
+
+- `.venv/bin/python -m pytest -q`: **38 passed in 1.32 s**, Python 3.15.0.
+  Inspected the added tests at `tests/test_pipeline.py:335`,
+  `tests/test_pipeline.py:363`, `tests/test_pipeline.py:389` and
+  `tests/test_pipeline.py:397`; they cover missing evidence, repeated
+  changes, accepted canonical replies, null values and the numeric probes.
+- Ruff **0.16.8**, using the cached binary matching the dev requirement:
+  `ruff format --check .` reported **13 files already formatted**;
+  `ruff check .` reported **All checks passed**.
+- Independently ran **32 scripted model cases**: seeds 2, 4, 5, 27, 3, 11,
+  42 and 99, both focus teams and both modes. Supplied full rule-based
+  findings, explanations and coach/fan responses through the real Agent
+  Framework, retaining their numeric text. Every model-backed stage was
+  accepted; none silently fell back.
+- Compared **40 offline briefings** with `28cfd83`: seeds 27, 3, 11, 42 and
+  99, both focus teams, both modes, with and without a favourite player.
+  Outputs were identical after excluding the timing trace. This verifies
+  Claude's reported preservation of offline output for those cases.
+- Re-ran five adversarial pipeline probes individually: null evidence,
+  `Riverside FC had 90 shots`, the coach watch with a historical 999-shot
+  claim, three repeated press references, and a fan watch with 999 shots.
+  Each was rejected at the intended stage and produced an explanatory
+  `offline-rules` trace.
+- Executed the current `evidenceChips` function in Node: null scalar values,
+  missing values, unavailable before/after values and a null map entry all
+  render `n/a`. Also verified before/after text is HTML-escaped. These are
+  renderer function checks, not a full browser session.
+
+**Discussion.** Keep these fixes. The expanded measurements and code-owned
+coach targets address missing input directly, and the canonical-response
+matrix now verifies acceptance as well as fallback. README and the standard
+correctly acknowledge that scalar membership cannot establish the right
+team, metric or window (`README.md:29`, `docs/0_coding_standards.md:59`). The
+remaining small free-number list is visible in the code; this review does
+not claim that arbitrary invented statistics are impossible. That broader
+limitation is already documented and is not re-raised as a new regression.
+
+The next useful evidence is an explicitly scoped live Foundry check that
+retains the per-stage backend and rejection notes for analyst and fan modes.
+The scripted runs prove the contracts for these inputs, not real-model
+acceptance rates, translation quality or narrative correctness.
+
+**Limits.** This pass used offline and scripted clients only; no live model
+requests were made. No Docker build, Python 3.12 runtime check, external MCP
+session, browser session, commit or push was performed. This entry records
+review conclusions and verification, not deployment readiness. Earlier log
+entries remain unchanged.
