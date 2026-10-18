@@ -242,3 +242,12 @@ high presses, Mensah 11).
 a live model that computes its own numbers will now fall back to rules more
 often; the trace shows when. Worth one live run before the demo video.
 `docs/fan.png` and `docs/mobile.png` were not re-captured.
+
+## 2026-10-18 · Claude · Codex PR #4 review: two follow-ups
+
+Codex's GitHub review of PR #4 raised two P2 gaps in the new checks, both
+confirmed by reading `check_findings` and `check_changes`: a finding with
+empty or value-less evidence passed, and three coach changes for the same
+finding passed. Both now fall back to rules. Verified: one new test covers
+both cases (tactics and coach fall back, the explainer in between still uses
+the model); `pytest`: 20 passed; Ruff checks pass.

@@ -37,7 +37,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ```bash
 pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
-python -m pytest -q               # 19 tests, offline
+python -m pytest -q               # 20 tests, offline
 ruff format . && ruff check .     # style and lint, as CI runs them
 python -m halftime.mcp_server     # MCP server over stdio
 ```

@@ -120,7 +120,7 @@ def test_agent_framework_path_uses_model_replies(match):
             "concept": "pressure",
             "team": "away",
             "title": "T1",
-            "evidence": [],
+            "evidence": [{"label": "L", "value": 1}],
             "minute": 25,
         },
         {
@@ -128,7 +128,7 @@ def test_agent_framework_path_uses_model_replies(match):
             "concept": "rhythm",
             "team": "away",
             "title": "T2",
-            "evidence": [],
+            "evidence": [{"label": "L", "value": 1}],
             "minute": 25,
             "channel": "left",
             "creators": ["Duarte"],
@@ -138,7 +138,7 @@ def test_agent_framework_path_uses_model_replies(match):
             "concept": "chance_quality",
             "team": "home",
             "title": "T3",
-            "evidence": [],
+            "evidence": [{"label": "L", "value": 1}],
             "minute": 25,
             "goals_minus_xg": 0.3,
             "weak_link": "Mensah",
@@ -329,3 +329,28 @@ def test_high_presses_are_pressures_in_the_opponent_half(match):
     for side in ("home", "away"):
         s = metrics.team_summary(events, side)
         assert 0 < s["high_presses"] < s["pressures"]
+
+
+def test_reply_without_evidence_or_with_repeated_changes_falls_back(match):
+    findings, explanations, changes = _rules(match)
+    explanations = [
+        {**x, "why_it_matters": "It shifted the half."} for x in explanations
+    ]
+    no_evidence = [{**f, "evidence": []} for f in findings]
+    same_finding = [{**c, "finding": "press"} for c in changes]
+    client = ScriptedClient(
+        [
+            json.dumps(no_evidence),
+            json.dumps(explanations),
+            json.dumps(same_finding),
+        ]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "offline-rules"
+    assert _backends(out)["explainer"] == "ScriptedClient"
+    assert "each finding once" in out["trace"][3]["note"]
+    assert {c["finding"] for c in out["changes"]} == {
+        "press",
+        "threat",
+        "scoreline",
+    }

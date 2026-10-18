@@ -269,11 +269,14 @@ def check_findings(findings: Any) -> list[dict]:
         _require(_is_text(f.get("concept")), f"{f['id']}: concept missing")
         _require(
             isinstance(f.get("evidence"), list)
+            and f["evidence"]
             and all(
-                isinstance(e, dict) and _is_text(e.get("label"))
+                isinstance(e, dict)
+                and _is_text(e.get("label"))
+                and ("value" in e or ("before" in e and "after" in e))
                 for e in f["evidence"]
             ),
-            f"{f['id']}: evidence must be a list of labelled items",
+            f"{f['id']}: evidence must list labelled values",
         )
         _require(
             isinstance(f.get("minute"), int | float), f"{f['id']}: minute"
@@ -331,6 +334,10 @@ def check_changes(changes: Any) -> list[dict]:
             for c in changes
         ),
         "changes must be three {finding, action, watch} items",
+    )
+    _require(
+        {c["finding"] for c in changes} == set(FINDING_IDS),
+        "changes must cover each finding once",
     )
     return changes
 
