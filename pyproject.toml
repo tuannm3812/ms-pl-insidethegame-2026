@@ -1,0 +1,35 @@
+# Tooling config only; the app is run from source (see README).
+# Rules follow the master standard (coding-standards §3), tailored in
+# docs/0_coding_standards.md.
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort: stdlib, third-party, local groups
+    "B",   # bugbear
+    "UP",  # pyupgrade to 3.12 idioms
+    "N",   # pep8-naming
+    "D",   # docstrings, Google style
+    "ANN001",  # type hints on arguments (§3)
+    "ANN201",  # and return types, on public functions
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["halftime", "app"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test names describe the behaviour; a docstring would repeat them.
+"tests/*" = ["D", "ANN"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
