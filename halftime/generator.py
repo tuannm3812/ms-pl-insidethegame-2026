@@ -289,7 +289,9 @@ class _Sim:
             )
             self.clock += rng.uniform(1.8, 3.6)
             if not ok:
-                return self.turnover(side, None, ex, ey, kind="interception")
+                return self.turnover(
+                    side, carrier, ex, ey, kind="interception"
+                )
 
             # A long forward pass to a wide player or striker sometimes
             # triggers a sprint.

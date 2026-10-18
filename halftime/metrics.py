@@ -98,6 +98,9 @@ def team_summary(events: list[dict], side: str) -> dict:
         "xt_created": round(sum(max(0, pass_xt(e)) for e in done), 3),
         "ppda": ppda(events, side),
         "pressures": sum(1 for e in mine if e["type"] == "pressure"),
+        "high_presses": sum(
+            1 for e in mine if e["type"] == "pressure" and e["x"] >= 52.5
+        ),
         "turnovers_in_own_half": own_half_losses,
     }
 

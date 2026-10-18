@@ -247,7 +247,7 @@ function drawPitch(shots, teams) {
 
 function drawBars(sum) {
   const rows = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
-                ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "pressures"]];
+                ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
   $("bars").innerHTML = rows.map(([label, k, mul]) => {
     const h = +(sum.home[k] * (mul || 1)).toFixed(mul ? 0 : 2), a = +(sum.away[k] * (mul || 1)).toFixed(mul ? 0 : 2);
     const tot = h + a || 1;
