@@ -104,9 +104,26 @@ def backend_name(client: BaseChatClient | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_tools(match: dict) -> list[FunctionTool]:
-    """Wrap the metric functions as Agent Framework tools for one match."""
+def build_tools(
+    match: dict, seen: list[str] | None = None
+) -> list[FunctionTool]:
+    """Wrap the metric functions as Agent Framework tools for one match.
+
+    Args:
+        match: The generated match.
+        seen: If given, every tool result is appended to it, so the numbers a
+            model looked up count as grounded.
+
+    Returns:
+        The tools, ready to hand to an agent.
+    """
     from agent_framework import tool
+
+    def _out(value: Any) -> str:
+        text = json.dumps(value)
+        if seen is not None:
+            seen.append(text)
+        return text
 
     events = metrics.window(match["events"])
     names = {s: match["teams"][s]["name"] for s in SIDES}
@@ -140,14 +157,14 @@ def build_tools(match: dict) -> list[FunctionTool]:
             <= e["minute"]
             < (99 if to_minute >= 45 else to_minute)
         ]
-        return json.dumps(metrics.team_summary(evs, _side(team)))
+        return _out(metrics.team_summary(evs, _side(team)))
 
     @tool(description="First-half stats for one player by surname.")
     def player_stats(player: Annotated[str, "player surname"]) -> str:
         for p in metrics.player_stats(events, match).values():
             if p["name"].lower() == player.lower():
-                return json.dumps(p)
-        return json.dumps({"error": f"no player called {player}"})
+                return _out(p)
+        return _out({"error": f"no player called {player}"})
 
     @tool(
         description=(
@@ -160,7 +177,7 @@ def build_tools(match: dict) -> list[FunctionTool]:
         from_minute: Annotated[int, "only count passes from this minute"] = 0,
     ) -> str:
         evs = [e for e in events if e["minute"] >= from_minute]
-        return json.dumps(metrics.threat_channels(evs, _side(team)))
+        return _out(metrics.threat_channels(evs, _side(team)))
 
     return [team_stats, player_stats, threat_channels]
 
@@ -217,6 +234,205 @@ def parse_json_reply(text: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Checks on model replies. A reply that fails one is treated like a reply
+# that could not be parsed: the step falls back to its rule-based version.
+# ---------------------------------------------------------------------------
+
+FINDING_IDS = ("press", "threat", "scoreline")
+CHANNELS = ("left", "centre", "right")
+# Numbers a model may use without them appearing in its input: small counts
+# such as "three changes", and "45" for a half. Kept short on purpose; any
+# other number has to come from the input.
+FREE_NUMBERS = {0, 1, 2, 3, 45}
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _require(ok: bool, what: str) -> None:
+    if not ok:
+        raise ValueError(f"model reply rejected: {what}")
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _evidence_value_ok(item: dict) -> bool:
+    """Evidence is {before, after} numbers, or a value the page can show."""
+    if "before" in item or "after" in item:
+        return _is_number(item.get("before")) and _is_number(item.get("after"))
+    value = item.get("value")
+    if isinstance(value, dict):
+        return bool(value) and all(_is_number(v) for v in value.values())
+    return _is_number(value) or _is_text(value)
+
+
+def check_findings(findings: Any) -> list[dict]:
+    """Reject tactics output the explainer, coach and page cannot use."""
+    _require(isinstance(findings, list), "findings must be a list")
+    _require(
+        sorted(f.get("id") for f in findings if isinstance(f, dict))
+        == sorted(FINDING_IDS),
+        f"findings need exactly the ids {FINDING_IDS}",
+    )
+    for f in findings:
+        _require(f.get("team") in SIDES, f"{f['id']}: team must be home/away")
+        _require(_is_text(f.get("title")), f"{f['id']}: title missing")
+        _require(_is_text(f.get("concept")), f"{f['id']}: concept missing")
+        _require(
+            isinstance(f.get("evidence"), list)
+            and f["evidence"]
+            and all(
+                isinstance(e, dict)
+                and _is_text(e.get("label"))
+                and _evidence_value_ok(e)
+                for e in f["evidence"]
+            ),
+            f"{f['id']}: evidence must list labelled values",
+        )
+        _require(
+            isinstance(f.get("minute"), int | float), f"{f['id']}: minute"
+        )
+        if f["id"] == "threat":
+            _require(f.get("channel") in CHANNELS, "threat: channel")
+            _require(
+                isinstance(f.get("creators"), list)
+                and f["creators"]
+                and all(_is_text(c) for c in f["creators"]),
+                "threat: creators must name at least one player",
+            )
+        if f["id"] == "scoreline":
+            _require(
+                isinstance(f.get("goals_minus_xg"), int | float),
+                "scoreline: goals_minus_xg must be a number",
+            )
+            _require(
+                f.get("weak_link") is None or _is_text(f["weak_link"]),
+                "scoreline: weak_link must be a name or null",
+            )
+    return findings
+
+
+def check_explanations(explanations: Any) -> list[dict]:
+    """Reject explainer output that does not cover every finding."""
+    _require(isinstance(explanations, list), "explanations must be a list")
+    _require(
+        all(
+            isinstance(x, dict)
+            and x.get("id") in FINDING_IDS
+            and _is_text(x.get("concept"))
+            and _is_text(x.get("why_it_matters"))
+            for x in explanations
+        ),
+        "each explanation needs id, concept and why_it_matters",
+    )
+    _require(
+        {x["id"] for x in explanations} == set(FINDING_IDS),
+        "explanations must cover every finding",
+    )
+    return explanations
+
+
+def check_changes(changes: Any) -> list[dict]:
+    """Reject coach output that is not three changes, one per finding."""
+    _require(isinstance(changes, list), "changes must be a list")
+    _require(
+        len(changes) == 3
+        and all(
+            isinstance(c, dict)
+            and c.get("finding") in FINDING_IDS
+            and _is_text(c.get("action"))
+            and _is_text(c.get("watch"))
+            for c in changes
+        ),
+        "changes must be three {finding, action, watch} items",
+    )
+    _require(
+        {c["finding"] for c in changes} == set(FINDING_IDS),
+        "changes must cover each finding once",
+    )
+    return changes
+
+
+def check_fan(fan: Any) -> dict:
+    """Reject fan output the page cannot render."""
+    _require(isinstance(fan, dict), "fan story must be an object")
+    _require(_is_text(fan.get("headline")), "fan: headline missing")
+    _require(
+        isinstance(fan.get("story"), list)
+        and fan["story"]
+        and all(_is_text(p) for p in fan["story"]),
+        "fan: story must be a list of paragraphs",
+    )
+    spot = fan.get("spotlight")
+    _require(
+        spot is None
+        or (
+            isinstance(spot, dict)
+            and _is_text(spot.get("player"))
+            and _is_text(spot.get("line"))
+        ),
+        "fan: spotlight must be {player, line} or null",
+    )
+    _require(_is_text(fan.get("watch_for")), "fan: watch_for missing")
+    return fan
+
+
+def _numbers_in(value: Any, skip: tuple[str, ...] = ()) -> list[float]:
+    """Every number in a reply, from numeric values and from inside text."""
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, int | float):
+        return [abs(float(value))]
+    if isinstance(value, str):
+        return [float(n) for n in _NUMBER.findall(value)]
+    if isinstance(value, dict):
+        return [
+            n
+            for k, v in value.items()
+            if k not in skip
+            for n in _numbers_in(v, skip)
+        ]
+    if isinstance(value, list):
+        return [n for v in value for n in _numbers_in(v, skip)]
+    return []
+
+
+def grounded_numbers(*sources: Any) -> set[float]:
+    """Numbers a reply may quote: those in its inputs, in any usual rounding.
+
+    A share such as 0.834 may also appear as a percentage (83 or 83.4).
+    """
+    allowed = {float(n) for n in FREE_NUMBERS}
+    for source in sources:
+        for n in _numbers_in(source):
+            forms = {n, round(n), round(n, 1), round(n, 2)}
+            if n <= 1:
+                forms |= {round(100 * n), round(100 * n, 1)}
+            allowed |= {float(f) for f in forms}
+    return allowed
+
+
+def check_grounded(
+    reply: Any, allowed: set[float], skip: tuple[str, ...] = ()
+) -> Any:
+    """Reject a reply that states a number its inputs do not contain.
+
+    This is a number filter, not a full proof: it checks that each number
+    exists somewhere in the input, not that it describes the right team,
+    metric or window. Keys in ``skip`` are not checked.
+    """
+    invented = sorted(
+        {n for n in _numbers_in(reply, skip) if round(n, 2) not in allowed}
+    )
+    _require(not invented, f"numbers not in the input: {invented[:5]}")
+    return reply
+
+
+# ---------------------------------------------------------------------------
 # Rule-based versions (offline mode, and the fallback if a model reply breaks)
 # ---------------------------------------------------------------------------
 
@@ -227,6 +443,58 @@ def _per_min(n: float, minutes: float) -> float:
 
 def _per_10(n: float, minutes: float) -> float:
     return round(10 * n / minutes, 2) if minutes else 0.0
+
+
+def _own_half_losses(facts: dict, side: str) -> dict[str, float]:
+    """Own-half losses per minute, before and after the turning point.
+
+    Read from the facts rather than a finding's evidence labels, which a model
+    may word differently.
+    """
+    tp = facts["turning_point"]
+    return {
+        when: _per_min(
+            tp[when][side]["turnovers_in_own_half"], tp[when][side]["minutes"]
+        )
+        for when in ("before", "after")
+    }
+
+
+def _possession_changes(facts: dict) -> dict[str, float]:
+    """Possession changes per minute, before and after the turning point."""
+    tl = facts["timeline"]
+    t = facts["turning_point"]["minute"]
+    return {
+        "before": round(
+            sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t)
+            / max(1, t // 5),
+            2,
+        ),
+        "after": round(
+            sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
+            / max(1, (45 - t) // 5),
+            2,
+        ),
+    }
+
+
+# Minutes of timeline the coach looks back over to judge momentum.
+MOMENTUM_WINDOW_MIN = 15
+
+
+def coach_targets(facts: dict, focus: str) -> dict:
+    """Second-half targets the coach may set, computed in code."""
+    opp = other(focus)
+    return {
+        "opponent_threat_share_in_channel_pct_below": 40,
+        "opponent_second_half_xg_below": max(
+            0.3, round(facts["summary"][opp]["xg"] / 2, 1)
+        ),
+        "own_half_losses_per_min": {
+            side: _own_half_losses(facts, side) for side in SIDES
+        },
+        "momentum_window_minutes": MOMENTUM_WINDOW_MIN,
+    }
 
 
 def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
@@ -262,14 +530,7 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
                 },
                 {
                     "label": f"{names[victim]} balls lost in own half per min",
-                    "before": _per_min(
-                        b[victim]["turnovers_in_own_half"],
-                        b[victim]["minutes"],
-                    ),
-                    "after": _per_min(
-                        a[victim]["turnovers_in_own_half"],
-                        a[victim]["minutes"],
-                    ),
+                    **_own_half_losses(facts, victim),
                 },
                 {
                     "label": f"{names[victim]} possession %",
@@ -399,24 +660,14 @@ def explain_offline(
 ) -> list[dict]:
     """Rule-based explainer agent: why each finding matters."""
     names = facts["teams"]
-    tl = facts["timeline"]
     t = facts["turning_point"]["minute"]
-    chaos_before = round(
-        sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t)
-        / max(1, t // 5),
-        2,
-    )
-    chaos_after = round(
-        sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
-        / max(1, (45 - t) // 5),
-        2,
-    )
+    chaos = _possession_changes(facts)
+    chaos_before, chaos_after = chaos["before"], chaos["after"]
     out = []
     for f in findings:
         if f["id"] == "press":
             p, v = f["team"], other(f["team"])
-            ev = {e["label"]: e for e in f["evidence"]}
-            lost = ev[f"{names[v]} balls lost in own half per min"]
+            lost = _own_half_losses(facts, v)
             tempo = (
                 "the game got scrappier"
                 if chaos_after > chaos_before + 0.3
@@ -494,10 +745,11 @@ def coach_offline(
         key=lambda p: p["top_speed_kmh"],
     )
     by_id = {f["id"]: f for f in findings}
+    targets = coach_targets(facts, focus)
     changes = []
 
     press = by_id["press"]
-    lost = next(e for e in press["evidence"] if "balls lost" in e["label"])
+    lost = _own_half_losses(facts, other(press["team"]))
     if press["team"] == opp:
         changes.append(
             {
@@ -551,7 +803,8 @@ def coach_offline(
                 ),
                 "watch": (
                     f"Their share of threat down the {threat['channel']} "
-                    "below 40%."
+                    "below "
+                    f"{targets['opponent_threat_share_in_channel_pct_below']}%."
                 ),
             }
         )
@@ -574,7 +827,7 @@ def coach_offline(
     leading = s[focus] > s[opp]
     momentum = [
         w["momentum"] if focus == "home" else -w["momentum"]
-        for w in facts["timeline"][-3:]
+        for w in facts["timeline"][-(MOMENTUM_WINDOW_MIN // 5) :]
     ]
     if score.get("weak_link") and score["weak_link"] not in (
         squad["DM"]["name"],
@@ -590,8 +843,8 @@ def coach_offline(
         )
     if leading and sum(momentum) < 0:
         action += (
-            " We lead but lost the last 15 minutes, so slow the restarts and "
-            "keep the ball for longer spells."
+            f" We lead but lost the last {MOMENTUM_WINDOW_MIN} minutes, so "
+            "slow the restarts and keep the ball for longer spells."
         )
     changes.append(
         {
@@ -599,7 +852,7 @@ def coach_offline(
             "action": action,
             "watch": (
                 "Their xG for the second half under "
-                f"{max(0.3, round(facts['summary'][opp]['xg'] / 2, 1))}."
+                f"{targets['opponent_second_half_xg_below']}."
             ),
         }
     )
@@ -787,23 +1040,27 @@ def overlays(
 
 TACTICS_INSTRUCTIONS = """\
 You are the tactics analyst for a football club. You get first-half facts as
-JSON, already computed from the event data, and tools to look up more. Find
-exactly three findings, using these ids: "press" (a change in pressing and what
-it did), "threat" (where the dominant side's attacking threat comes from),
+JSON, already computed from the event data, including measured evidence for
+each finding under "measurements", and tools to look up more. Find exactly
+three findings, using these ids: "press" (a change in pressing and what it
+did), "threat" (where the dominant side's attacking threat comes from),
 "scoreline" (the focus team's goals versus their chance quality, and their
-weakest link under pressure). Every claim must quote numbers from the facts or
-tools; never invent a statistic. Return a JSON list; each item needs id,
+weakest link under pressure). Quote numbers exactly as the facts,
+measurements or tools give them; never calculate or invent one. A reply with
+any other number is discarded. Return a JSON list; each item needs id,
 concept, team ("home" or "away"), title (one sentence), evidence (list of
 {label, before, after} or {label, value}), minute, and for "threat" also
-channel and creators, for "scoreline" also goals_minus_xg and weak_link.
+channel ("left", "centre" or "right") and creators, for "scoreline" also
+goals_minus_xg and weak_link (a player name or null).
 """
 
 EXPLAINER_INSTRUCTIONS = """\
 You explain football analysis to people who did not see the numbers. For each
 finding, say in two or three plain sentences why it matters to the result,
 using one lens: "Control vs chaos", "Game rhythm", "Pressure" or "Chance
-quality". Return a JSON list of {id, concept, why_it_matters}. Keep every
-number you mention identical to the input.
+quality". Return a JSON list of {id, concept, why_it_matters}. Quote numbers
+only as they appear in the findings or "measurements"; a reply with any other
+number is discarded.
 """
 
 COACH_INSTRUCTIONS = """\
@@ -811,7 +1068,9 @@ You are the assistant coach writing the half-time briefing for the focus team.
 Turn the findings into exactly three changes for the second half, one per
 finding. Each change names real players from the squad list and is something a
 coach can say in the dressing room. Return a JSON list of {finding, action,
-watch}, where watch is one measurable target for the second half.
+watch}, where watch is one measurable target for the second half, taken
+from "targets". Quote numbers only as they appear in the input; never
+calculate or invent one. A reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
@@ -819,7 +1078,9 @@ You are a match-day presenter writing a half-time story for a fan of the focus
 team, in the requested language. Be warm and clear, no jargon unless explained.
 If a favourite player is given, include a spotlight on them using their real
 stats. Return JSON {headline, story (list of 3 short paragraphs), spotlight
-({player, line} or null), watch_for, language}.
+({player, line} or null), watch_for, language}. Quote numbers only as they
+appear in the input; never calculate or invent one. A reply with any other
+number is discarded.
 """
 
 
@@ -860,14 +1121,23 @@ async def half_time_briefing(
         instructions: str,
         payload: dict,
         fallback: Callable[[], Any],
-        tools: list[FunctionTool] | None = None,
+        check: Callable[[Any], Any],
+        use_tools: bool = False,
+        skip: tuple[str, ...] = (),
     ) -> Any:
         started = time.perf_counter()
         if client is not None:
             try:
+                seen: list[str] = []
+                tools = build_tools(match, seen) if use_tools else None
                 out = await _run_agent(
                     client, agent, instructions, payload, tools
                 )
+                check(out)
+                allowed = grounded_numbers(
+                    payload, *(json.loads(t) for t in seen)
+                )
+                check_grounded(out, allowed, skip)
                 step(agent, backend_name(client), started)
                 return out
             # A broken reply should not break the show.
@@ -876,7 +1146,8 @@ async def half_time_briefing(
                     agent,
                     "offline-rules",
                     started,
-                    f"model step failed ({type(exc).__name__}), used rules",
+                    f"model step failed ({type(exc).__name__}: "
+                    f"{str(exc)[:120]}), used rules",
                 )
                 return fallback()
         out = fallback()
@@ -905,19 +1176,37 @@ async def half_time_briefing(
         )
     }
     slim["focus_team"] = focus
+    # Code-computed evidence for each finding, so the model can quote
+    # measured rates and shares instead of working them out.
+    rules_findings = tactics_offline(facts, match, focus)
+    slim["measurements"] = {
+        f["id"]: {k: v for k, v in f.items() if k not in ("title", "concept")}
+        for f in rules_findings
+    }
 
     findings = await model_or_rules(
         "tactics",
         TACTICS_INSTRUCTIONS,
         slim,
-        lambda: tactics_offline(facts, match, focus),
-        tools=build_tools(match) if client is not None else None,
+        lambda: rules_findings,
+        check_findings,
+        use_tools=True,
     )
     explanations = await model_or_rules(
         "explainer",
         EXPLAINER_INSTRUCTIONS,
-        {"findings": findings, "focus_team": focus_name},
+        {
+            "findings": findings,
+            "focus_team": focus_name,
+            "measurements": {
+                "possession_changes_per_min": _possession_changes(facts),
+                "own_half_losses_per_min": {
+                    side: _own_half_losses(facts, side) for side in SIDES
+                },
+            },
+        },
         lambda: explain_offline(findings, facts, focus),
+        check_explanations,
     )
 
     result: dict[str, Any] = {
@@ -952,8 +1241,10 @@ async def half_time_briefing(
                 "findings": findings,
                 "explanations": explanations,
                 "squad": squad,
+                "targets": coach_targets(facts, focus),
             },
             lambda: coach_offline(findings, facts, match, focus),
+            check_changes,
         )
     else:
         players = {p["name"]: p for p in facts["players"].values()}
@@ -965,6 +1256,7 @@ async def half_time_briefing(
                 "language": language,
                 "score": facts["score"],
                 "teams": facts["teams"],
+                "summary": facts["summary"],
                 "findings": findings,
                 "favourite_player": players.get(player) if player else None,
                 "goals": [
@@ -972,6 +1264,7 @@ async def half_time_briefing(
                 ],
             },
             lambda: fan_offline(findings, facts, focus, player),
+            check_fan,
         )
         if client is None and language != "en":
             result["fan"]["note"] = (
