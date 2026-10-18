@@ -259,8 +259,9 @@ function drawBars(sum) {
 
 function evidenceChips(f) {
   return (f.evidence || []).map((e) => {
-    if ("before" in e) return `<span class="chip">${esc(e.label)}: ${e.before} → ${e.after}</span>`;
-    const v = typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${x}`).join(", ") : e.value;
+    const show = (x) => (x === null || x === undefined ? "n/a" : x);
+    if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → ${esc(show(e.after))}</span>`;
+    const v = e.value && typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${show(x)}`).join(", ") : show(e.value);
     return `<span class="chip">${esc(e.label)}: ${esc(v)}</span>`;
   }).join("");
 }

@@ -240,9 +240,10 @@ def parse_json_reply(text: str) -> Any:
 
 FINDING_IDS = ("press", "threat", "scoreline")
 CHANNELS = ("left", "centre", "right")
-# Numbers a model may use without them appearing in its input: counts such
-# as "three changes" and standard match times.
-FREE_NUMBERS = {0, 1, 2, 3, 4, 5, 10, 15, 30, 45, 90, 100}
+# Numbers a model may use without them appearing in its input: small counts
+# such as "three changes", and "45" for a half. Kept short on purpose; any
+# other number has to come from the input.
+FREE_NUMBERS = {0, 1, 2, 3, 45}
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -253,6 +254,20 @@ def _require(ok: bool, what: str) -> None:
 
 def _is_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _evidence_value_ok(item: dict) -> bool:
+    """Evidence is {before, after} numbers, or a value the page can show."""
+    if "before" in item or "after" in item:
+        return _is_number(item.get("before")) and _is_number(item.get("after"))
+    value = item.get("value")
+    if isinstance(value, dict):
+        return bool(value) and all(_is_number(v) for v in value.values())
+    return _is_number(value) or _is_text(value)
 
 
 def check_findings(findings: Any) -> list[dict]:
@@ -273,7 +288,7 @@ def check_findings(findings: Any) -> list[dict]:
             and all(
                 isinstance(e, dict)
                 and _is_text(e.get("label"))
-                and ("value" in e or ("before" in e and "after" in e))
+                and _evidence_value_ok(e)
                 for e in f["evidence"]
             ),
             f"{f['id']}: evidence must list labelled values",
@@ -406,9 +421,9 @@ def check_grounded(
 ) -> Any:
     """Reject a reply that states a number its inputs do not contain.
 
-    This enforces "every number comes from code" for model-backed agents.
-    Keys in ``skip`` hold targets the agent chooses (such as a coach's
-    "watch" goal) rather than statistics, so they are not checked.
+    This is a number filter, not a full proof: it checks that each number
+    exists somewhere in the input, not that it describes the right team,
+    metric or window. Keys in ``skip`` are not checked.
     """
     invented = sorted(
         {n for n in _numbers_in(reply, skip) if round(n, 2) not in allowed}
@@ -442,6 +457,43 @@ def _own_half_losses(facts: dict, side: str) -> dict[str, float]:
             tp[when][side]["turnovers_in_own_half"], tp[when][side]["minutes"]
         )
         for when in ("before", "after")
+    }
+
+
+def _possession_changes(facts: dict) -> dict[str, float]:
+    """Possession changes per minute, before and after the turning point."""
+    tl = facts["timeline"]
+    t = facts["turning_point"]["minute"]
+    return {
+        "before": round(
+            sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t)
+            / max(1, t // 5),
+            2,
+        ),
+        "after": round(
+            sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
+            / max(1, (45 - t) // 5),
+            2,
+        ),
+    }
+
+
+# Minutes of timeline the coach looks back over to judge momentum.
+MOMENTUM_WINDOW_MIN = 15
+
+
+def coach_targets(facts: dict, focus: str) -> dict:
+    """Second-half targets the coach may set, computed in code."""
+    opp = other(focus)
+    return {
+        "opponent_threat_share_in_channel_pct_below": 40,
+        "opponent_second_half_xg_below": max(
+            0.3, round(facts["summary"][opp]["xg"] / 2, 1)
+        ),
+        "own_half_losses_per_min": {
+            side: _own_half_losses(facts, side) for side in SIDES
+        },
+        "momentum_window_minutes": MOMENTUM_WINDOW_MIN,
     }
 
 
@@ -608,18 +660,9 @@ def explain_offline(
 ) -> list[dict]:
     """Rule-based explainer agent: why each finding matters."""
     names = facts["teams"]
-    tl = facts["timeline"]
     t = facts["turning_point"]["minute"]
-    chaos_before = round(
-        sum(w["possession_changes_per_min"] for w in tl if w["to"] <= t)
-        / max(1, t // 5),
-        2,
-    )
-    chaos_after = round(
-        sum(w["possession_changes_per_min"] for w in tl if w["from"] >= t)
-        / max(1, (45 - t) // 5),
-        2,
-    )
+    chaos = _possession_changes(facts)
+    chaos_before, chaos_after = chaos["before"], chaos["after"]
     out = []
     for f in findings:
         if f["id"] == "press":
@@ -702,6 +745,7 @@ def coach_offline(
         key=lambda p: p["top_speed_kmh"],
     )
     by_id = {f["id"]: f for f in findings}
+    targets = coach_targets(facts, focus)
     changes = []
 
     press = by_id["press"]
@@ -759,7 +803,8 @@ def coach_offline(
                 ),
                 "watch": (
                     f"Their share of threat down the {threat['channel']} "
-                    "below 40%."
+                    "below "
+                    f"{targets['opponent_threat_share_in_channel_pct_below']}%."
                 ),
             }
         )
@@ -782,7 +827,7 @@ def coach_offline(
     leading = s[focus] > s[opp]
     momentum = [
         w["momentum"] if focus == "home" else -w["momentum"]
-        for w in facts["timeline"][-3:]
+        for w in facts["timeline"][-(MOMENTUM_WINDOW_MIN // 5) :]
     ]
     if score.get("weak_link") and score["weak_link"] not in (
         squad["DM"]["name"],
@@ -798,8 +843,8 @@ def coach_offline(
         )
     if leading and sum(momentum) < 0:
         action += (
-            " We lead but lost the last 15 minutes, so slow the restarts and "
-            "keep the ball for longer spells."
+            f" We lead but lost the last {MOMENTUM_WINDOW_MIN} minutes, so "
+            "slow the restarts and keep the ball for longer spells."
         )
     changes.append(
         {
@@ -807,7 +852,7 @@ def coach_offline(
             "action": action,
             "watch": (
                 "Their xG for the second half under "
-                f"{max(0.3, round(facts['summary'][opp]['xg'] / 2, 1))}."
+                f"{targets['opponent_second_half_xg_below']}."
             ),
         }
     )
@@ -1013,8 +1058,9 @@ EXPLAINER_INSTRUCTIONS = """\
 You explain football analysis to people who did not see the numbers. For each
 finding, say in two or three plain sentences why it matters to the result,
 using one lens: "Control vs chaos", "Game rhythm", "Pressure" or "Chance
-quality". Return a JSON list of {id, concept, why_it_matters}. Keep every
-number you mention identical to the input.
+quality". Return a JSON list of {id, concept, why_it_matters}. Quote numbers
+only as they appear in the findings or "measurements"; a reply with any other
+number is discarded.
 """
 
 COACH_INSTRUCTIONS = """\
@@ -1022,8 +1068,9 @@ You are the assistant coach writing the half-time briefing for the focus team.
 Turn the findings into exactly three changes for the second half, one per
 finding. Each change names real players from the squad list and is something a
 coach can say in the dressing room. Return a JSON list of {finding, action,
-watch}, where watch is one measurable target for the second half. Quote
-statistics only as they appear in the input; never calculate or invent one.
+watch}, where watch is one measurable target for the second half, taken
+from "targets". Quote numbers only as they appear in the input; never
+calculate or invent one. A reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
@@ -1032,7 +1079,8 @@ team, in the requested language. Be warm and clear, no jargon unless explained.
 If a favourite player is given, include a spotlight on them using their real
 stats. Return JSON {headline, story (list of 3 short paragraphs), spotlight
 ({player, line} or null), watch_for, language}. Quote numbers only as they
-appear in the input; never calculate or invent one.
+appear in the input; never calculate or invent one. A reply with any other
+number is discarded.
 """
 
 
@@ -1131,7 +1179,10 @@ async def half_time_briefing(
     # Code-computed evidence for each finding, so the model can quote
     # measured rates and shares instead of working them out.
     rules_findings = tactics_offline(facts, match, focus)
-    slim["measurements"] = {f["id"]: f["evidence"] for f in rules_findings}
+    slim["measurements"] = {
+        f["id"]: {k: v for k, v in f.items() if k not in ("title", "concept")}
+        for f in rules_findings
+    }
 
     findings = await model_or_rules(
         "tactics",
@@ -1144,7 +1195,16 @@ async def half_time_briefing(
     explanations = await model_or_rules(
         "explainer",
         EXPLAINER_INSTRUCTIONS,
-        {"findings": findings, "focus_team": focus_name},
+        {
+            "findings": findings,
+            "focus_team": focus_name,
+            "measurements": {
+                "possession_changes_per_min": _possession_changes(facts),
+                "own_half_losses_per_min": {
+                    side: _own_half_losses(facts, side) for side in SIDES
+                },
+            },
+        },
         lambda: explain_offline(findings, facts, focus),
         check_explanations,
     )
@@ -1181,10 +1241,10 @@ async def half_time_briefing(
                 "findings": findings,
                 "explanations": explanations,
                 "squad": squad,
+                "targets": coach_targets(facts, focus),
             },
             lambda: coach_offline(findings, facts, match, focus),
             check_changes,
-            skip=("watch",),
         )
     else:
         players = {p["name"]: p for p in facts["players"].values()}
@@ -1205,7 +1265,6 @@ async def half_time_briefing(
             },
             lambda: fan_offline(findings, facts, focus, player),
             check_fan,
-            skip=("watch_for",),
         )
         if client is None and language != "en":
             result["fan"]["note"] = (
