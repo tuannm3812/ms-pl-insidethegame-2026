@@ -7,7 +7,15 @@ from agent_framework import BaseChatClient, ChatResponse, Message
 from fastapi.testclient import TestClient
 
 from halftime import metrics
-from halftime.agents import half_time_briefing, parse_json_reply
+from halftime.agents import (
+    check_grounded,
+    coach_offline,
+    explain_offline,
+    grounded_numbers,
+    half_time_briefing,
+    parse_json_reply,
+    tactics_offline,
+)
 from halftime.generator import generate_match, shot_xg
 from halftime.xt import grid
 
@@ -163,10 +171,12 @@ def test_broken_model_reply_falls_back_to_rules(match):
     assert "used rules" in out["trace"][1]["note"]
 
 
-def test_api():
-    from app import app
+def test_api(monkeypatch):
+    import app as app_module
 
-    c = TestClient(app)
+    # Stay offline even when a developer's .env configures a model.
+    monkeypatch.setattr(app_module, "client", None)
+    c = TestClient(app_module.app)
     assert c.get("/api/health").json()["ok"]
     r = c.get(
         "/api/briefing",
@@ -230,3 +240,92 @@ def test_parse_json_reply_ignores_prose_and_fences():
     ) == [{"id": "press"}]
     with pytest.raises(ValueError):
         parse_json_reply("no json here")
+
+
+def _rules(match, focus="home"):
+    facts = metrics.half_time_facts(match)
+    findings = tactics_offline(facts, match, focus)
+    return (
+        findings,
+        explain_offline(findings, facts, focus),
+        coach_offline(findings, facts, match, focus),
+    )
+
+
+def _backends(out):
+    return {t["agent"]: t["backend"] for t in out["trace"]}
+
+
+def test_rule_replies_pass_the_model_checks(match):
+    findings, explanations, changes = _rules(match)
+    explanations = [
+        {**x, "why_it_matters": "It shifted the half."} for x in explanations
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert set(_backends(out).values()) >= {"ScriptedClient"}
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    assert _backends(out)["coach"] == "ScriptedClient"
+
+
+def test_wrong_shape_reply_falls_back(match):
+    findings, explanations, _ = _rules(match)
+    explanations = [
+        {**x, "why_it_matters": "It shifted the half."} for x in explanations
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), "{}", "{}"]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert isinstance(out["changes"], list) and len(out["changes"]) == 3
+    assert _backends(out)["coach"] == "offline-rules"
+
+
+def test_fallback_survives_reworded_model_evidence(match):
+    findings, _, _ = _rules(match)
+    for e in findings[0]["evidence"]:
+        e["label"] = e["label"].replace(
+            "balls lost in own half per min", "own-half losses/min"
+        )
+    client = ScriptedClient(
+        [json.dumps(findings), "not json", "still not json", "nope", "no"]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    assert _backends(out)["explainer"] == "offline-rules"
+    assert len(out["explanations"]) == 3
+
+
+def test_invented_statistic_is_rejected(match):
+    findings, _, _ = _rules(match)
+    findings[0]["title"] = "Riverside FC had 999 shots"
+    client = ScriptedClient([json.dumps(findings)] * 2 + ["no"] * 6)
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "offline-rules"
+    assert "999" not in json.dumps(out["findings"])
+
+
+def test_grounding_accepts_roundings_and_percentages():
+    allowed = grounded_numbers({"pass_accuracy": 0.834, "xg": 1.237})
+    check_grounded("83% of passes, 83.4%, xG 1.24 or 1.2", allowed)
+    with pytest.raises(ValueError):
+        check_grounded("xG 2.7", allowed)
+
+
+def test_player_losses_add_up_to_team_losses(match):
+    events = metrics.window(match["events"])
+    players = metrics.player_stats(events, match).values()
+    for side in ("home", "away"):
+        team = metrics.team_summary(events, side)["turnovers_in_own_half"]
+        assert team == sum(
+            p["lost_ball_in_own_half"] for p in players if p["team"] == side
+        )
+
+
+def test_high_presses_are_pressures_in_the_opponent_half(match):
+    events = metrics.window(match["events"])
+    for side in ("home", "away"):
+        s = metrics.team_summary(events, side)
+        assert 0 < s["high_presses"] < s["pressures"]
