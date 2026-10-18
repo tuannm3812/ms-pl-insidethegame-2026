@@ -507,3 +507,83 @@ Offline output unchanged.
 
 **Open.** Redeploy and rerun the live analyst briefing to confirm the coach
 uses the model; if it still falls back, the new reason says why.
+
+## 2026-10-19 · Codex · PR #5 review against AGENTS.md, pass 4
+
+**Scope.** Reviewed [PR #5](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/5),
+base `8f7a0b1ecf4323bddd5198374d60823dda7e91e8` to head
+`7f6c3b3a1d2c4dfd2d14a214afedafc746c311db`, against `AGENTS.md`,
+`docs/0_coding_standards.md` and the previously read master standard.
+Fetched the PR into a separate review ref and tested an archived snapshot
+under `/private/tmp`, leaving the main checkout unchanged apart from this
+log append. An independent reviewer inspected the same diff and standards.
+The PR also carries the earlier pass 3 log entry; this pass reviews its new
+coach fix and supporting evidence rather than repeating that review.
+
+**Result.** No actionable findings or blocking standards violations in the
+reviewed diff. The prompt change is consistent with the existing output
+contract, and the validator refactor preserves its acceptance rules.
+
+**Checked.** File/line references below refer to the PR head.
+
+- `halftime/agents.py:1067-1077`: the coach prompt now explicitly requires
+  `finding` to be `press`, `threat` or `scoreline`, and `finding`, `action`
+  and `watch` to be strings. This matches the validator and the existing
+  input payload, retains code-owned targets, and preserves the prohibition
+  on inventing statistics.
+- `halftime/agents.py:339-358`: rejection notes distinguish list length,
+  item type, finding reference, text fields and missing finding coverage.
+  Existing fallback and numeric-filter boundaries remain unchanged. Action
+  and watch still share one text-field diagnostic; it narrows the failure
+  but does not identify which of those two fields failed.
+- `tests/test_pipeline.py:413-424`: the new test accepts a valid reply and
+  checks specific rejection reasons for a title-valued finding and an
+  object-valued watch. It tests validation and diagnostics, not whether a
+  real model follows the revised prompt.
+- README updates the test count to 39. The PR only appends to the agent
+  log and explicitly labels the proposed live root cause as inferred.
+
+**Verified.**
+
+- Exact PR snapshot: `.venv/bin/python -m pytest -q`, using the existing
+  environment's absolute interpreter path: **39 passed in 0.95 s**,
+  Python 3.15.0. The API test replaces the configured client before requests;
+  no live model requests were made by this review.
+- Ruff **0.16.8**: format check reported **13 files already formatted**;
+  lint reported **All checks passed**. `git diff --check` also passed for
+  the PR range.
+- Compared old and new `check_changes` on **577 JSON-shaped cases**,
+  including valid output, wrong lengths/types, missing/invalid references,
+  repeated IDs, blank text and object-valued fields. Acceptance/rejection
+  matched in every case. This supports the PR's statement that its checks
+  are no stricter or looser for those inputs.
+- Compared **40 offline briefings** with the PR base: seeds 27, 3, 11, 42
+  and 99, both focus teams, both modes, with and without a favourite player.
+  Output was identical after excluding the timing trace.
+- Read GitHub's current PR metadata and rechecked the head SHA after local
+  verification. The PR remained open at the reviewed SHA; both CI jobs,
+  `test` and `docker`, reported **SUCCESS**. Those are GitHub-reported
+  results, not a local Docker build by this pass.
+
+**Discussion / live evidence still needed.** The PR log reports revision
+`halftime-briefing--0000003` as healthy with tactics/explainer/fan using the
+model, while coach fell back on all three analyst runs. This is the author's
+record, not a deployment observation independently repeated here. The old
+aggregate shape error cannot establish whether the actual bad value was a
+finding title, an object-valued watch, or another rejected shape. The prompt
+clarification is a reasonable fix for the inferred mismatch, and the better
+diagnostics will make the next failure more useful; neither proves live
+coach acceptance yet.
+
+After deploying this exact head, retain at least one analyst briefing's
+per-stage trace (preferably both focus teams) and confirm the coach stage
+uses the model with an empty rejection note. A healthy endpoint or HTTP 200
+alone does not prove that. If it still falls back, use the new reason to
+identify the failing field before changing the prompt or validator again.
+Do not relax numeric or shape checks to make the backend label look green.
+
+**Limits.** No live model call, redeploy, merge, GitHub review/comment,
+commit or push was performed. Python 3.12 and local container execution were
+not checked. Only this local log entry was added; earlier entries remain
+unchanged. Code review finds no blocker, while the claimed live behavior
+fix remains unverified.
