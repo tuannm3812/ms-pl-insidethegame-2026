@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 
 import pytest
 from agent_framework import BaseChatClient, ChatResponse, Message
@@ -103,3 +104,23 @@ def test_api():
     assert r.status_code == 200 and r.json()["fan"]["spotlight"]["player"] == "Novak"
     assert c.get("/").status_code == 200
     assert len(c.get("/api/events").json()) > 500
+
+
+def test_key_based_foundry_client_from_env_file(tmp_path, monkeypatch):
+    from halftime.agents import azure_resource_endpoint, make_client
+
+    assert azure_resource_endpoint("https://res.services.ai.azure.com/api/projects/p1") == \
+        "https://res.services.ai.azure.com/"
+    for k in ("FOUNDRY_PROJECT_ENDPOINT", "FOUNDRY_MODEL", "AZURE_OPENAI_ENDPOINT",
+              "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT", "OPENAI_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    (tmp_path / ".env").write_text("AZURE_OPENAI_ENDPOINT=https://res.openai.azure.com/openai/v1/\n"
+                                   "export AZURE_OPENAI_API_KEY='abc'\nAZURE_OPENAI_DEPLOYMENT=my-gpt\n")
+    monkeypatch.chdir(tmp_path)
+    try:
+        client = make_client()
+        assert type(client).__name__ == "OpenAIChatClient"
+        assert str(client.client.base_url) == "https://res.openai.azure.com/openai/v1/"
+    finally:
+        for k in ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+            os.environ.pop(k, None)

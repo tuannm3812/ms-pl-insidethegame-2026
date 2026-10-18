@@ -31,21 +31,52 @@ from .metrics import SIDES, other
 # ---------------------------------------------------------------------------
 
 
+def load_env_file(path: str = ".env") -> None:
+    """Read KEY=VALUE lines from a local .env file into the environment.
+
+    Keeps keys out of the code and out of shell history. Values already set
+    in the environment win, and a missing file is fine.
+    """
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except FileNotFoundError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def azure_resource_endpoint(url: str) -> str:
+    """Accept any Foundry/Azure OpenAI URL a portal shows and return the resource root."""
+    m = re.match(r"(https://[^/]+)", url.strip())
+    return m.group(1) + "/" if m else url
+
+
 def make_client():
     """Pick a chat client from the environment, or None for offline mode."""
+    load_env_file()
     if os.getenv("FOUNDRY_PROJECT_ENDPOINT") and os.getenv("FOUNDRY_MODEL"):
         from agent_framework.foundry import FoundryChatClient
         from azure.identity import DefaultAzureCredential
 
         return FoundryChatClient(credential=DefaultAzureCredential())
-    if os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_ENDPOINT"):
+    if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_API_KEY"):
+        # Key-based access to a model deployed in Foundry (Azure OpenAI v1 API).
         from agent_framework.openai import OpenAIChatClient
 
         return OpenAIChatClient(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY"),
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            azure_endpoint=azure_resource_endpoint(os.environ["AZURE_OPENAI_ENDPOINT"]),
+            api_key=os.environ["AZURE_OPENAI_API_KEY"],
         )
+    if os.getenv("OPENAI_API_KEY"):
+        from agent_framework.openai import OpenAIChatClient
+
+        return OpenAIChatClient(model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+                                api_key=os.environ["OPENAI_API_KEY"])
     return None
 
 
