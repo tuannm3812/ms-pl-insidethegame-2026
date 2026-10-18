@@ -26,7 +26,7 @@ Built for the Microsoft x Premier League *Inside the Game* hackathon.
 stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ```
 
-- **Every number comes from code.** The model-backed agents only explain and decide, so they cannot invent a stat.
+- **Every number comes from code.** The model-backed agents only explain and decide. A model reply that quotes a number not in its input, or has the wrong shape, is discarded and the rule-based version is used instead; the trace says so.
 - **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach and fan. The tactics agent also gets the metric functions as tools.
 - **Backend:** a model in Microsoft Foundry, configured in `.env` either keyless (`FOUNDRY_PROJECT_ENDPOINT` + `FOUNDRY_MODEL`, Entra ID sign-in) or with a key (`AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_DEPLOYMENT`). Plain OpenAI (`OPENAI_API_KEY`) also works.
 - **No model configured:** each agent falls back to a rule-based version with the same output shape, so the demo always runs. The same fallback catches a model reply that can't be parsed.
@@ -37,7 +37,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ```bash
 pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
-python -m pytest -q               # 11 tests
+python -m pytest -q               # 19 tests, offline
 ruff format . && ruff check .     # style and lint, as CI runs them
 python -m halftime.mcp_server     # MCP server over stdio
 ```
