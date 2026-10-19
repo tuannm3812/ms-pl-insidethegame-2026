@@ -7,7 +7,8 @@ Five roles, run in order:
   2. Tactics agent    finds the three patterns that decided the half
   3. Explainer agent  says why each pattern matters (control vs chaos,
                       pressure, rhythm)
-  4. Coach agent      turns them into three second-half changes (analyst mode)
+  4. Coach agent      offers two options per finding, each with its
+                      trade-off (analyst mode)
      Fan agent        turns them into a story about your team/player
                       (fan mode)
   5. Overlay agent    renders timed, machine-readable graphics cards
@@ -336,8 +337,21 @@ def check_explanations(explanations: Any) -> list[dict]:
     return explanations
 
 
+CHANGE_TEXT_FIELDS = (
+    "action",
+    "tradeoff",
+    "alternative",
+    "alternative_tradeoff",
+    "watch",
+)
+
+
 def check_changes(changes: Any) -> list[dict]:
-    """Reject coach output that is not three changes, one per finding."""
+    """Reject coach output that is not three changes, one per finding.
+
+    Each change carries two options, each with its trade-off, so the coach
+    is offered a choice rather than an order.
+    """
     _require(isinstance(changes, list), "changes must be a list")
     _require(len(changes) == 3, "changes must be three items")
     for c in changes:
@@ -348,8 +362,9 @@ def check_changes(changes: Any) -> list[dict]:
             f"change finding must be one of {FINDING_IDS}",
         )
         _require(
-            _is_text(c.get("action")) and _is_text(c.get("watch")),
-            "change action and watch must be non-empty text",
+            all(_is_text(c.get(k)) for k in CHANGE_TEXT_FIELDS),
+            "change action, tradeoff, alternative, alternative_tradeoff "
+            "and watch must be non-empty text",
         )
     _require(
         {c["finding"] for c in changes} == set(FINDING_IDS),
@@ -762,6 +777,19 @@ def coach_offline(
                     f"(top speed {fastest['top_speed_kmh']} km/h) to turn "
                     "their press into space behind."
                 ),
+                "tradeoff": (
+                    "Going longer gives up some possession, so expect fewer "
+                    "spells of control."
+                ),
+                "alternative": (
+                    f"Play through it: {squad['GK']['name']} waits for "
+                    f"{squad['CM']['name']} to drop in and we play short "
+                    "to draw their press on before releasing the full-backs."
+                ),
+                "alternative_tradeoff": (
+                    "Keeps the ball but one loose pass near our box is a "
+                    "big chance for them."
+                ),
                 "watch": (
                     f"Balls lost in our half back under {lost['before']} a "
                     f"minute (now {lost['after']})."
@@ -776,6 +804,17 @@ def coach_offline(
                     "Keep the high press, it is working, but hold "
                     f"{squad['DM']['name']} deeper so one long ball "
                     f"does not get them past our front line."
+                ),
+                "tradeoff": (
+                    "Pressing for another 45 minutes costs legs; the front "
+                    "three may need changing before the end."
+                ),
+                "alternative": (
+                    "Drop into a mid-block after the hour and keep the "
+                    "front line fresh for counters."
+                ),
+                "alternative_tradeoff": (
+                    "Gives them more of the ball and time to build."
                 ),
                 "watch": (
                     f"Keep {names[opp]} losing the ball in their half at "
@@ -802,6 +841,18 @@ def coach_offline(
                     )
                     + "."
                 ),
+                "tradeoff": (
+                    f"Pulling {helper} back costs us an outlet on that side "
+                    "when we win the ball."
+                ),
+                "alternative": (
+                    f"Stay compact instead: {squad['DM']['name']} sits in "
+                    f"front of the back four so the {threat['channel']} "
+                    "channel is screened without pulling a winger back."
+                ),
+                "alternative_tradeoff": (
+                    "Leaves the full-backs one-on-one if they switch play."
+                ),
                 "watch": (
                     f"Their share of threat down the {threat['channel']} "
                     "below "
@@ -819,6 +870,17 @@ def coach_offline(
                     f"{' and '.join(threat['creators'])}. Expect them to "
                     "shift cover there, so have the far side ready."
                 ),
+                "tradeoff": (
+                    "If they double up there, our threat drops until we "
+                    "switch sides."
+                ),
+                "alternative": (
+                    "Switch the point of attack early and often so their "
+                    "cover never settles on one side."
+                ),
+                "alternative_tradeoff": (
+                    "Longer switches are harder passes and some will be lost."
+                ),
                 "watch": "Our xT per minute stays at first-half levels.",
             }
         )
@@ -835,13 +897,26 @@ def coach_offline(
     ):
         action = (
             f"Protect {score['weak_link']}: give them a short option on every "
-            "touch, or replace them if they keep being targeted."
+            "touch so they are never isolated under pressure."
+        )
+        tradeoff = "Ties a second player to them and thins our midfield."
+        alternative = (
+            f"Replace {score['weak_link']} at the break if they keep being "
+            "targeted."
+        )
+        alternative_tradeoff = (
+            "Uses a substitution early and unsettles the back line."
         )
     else:
         action = (
             "Get one more runner into the box: our best chances came from "
             "close range."
         )
+        tradeoff = "One fewer body behind the ball on the counter."
+        alternative = (
+            "Keep the shape and work the ball to the byline for cut-backs."
+        )
+        alternative_tradeoff = "Slower, and fewer shots if they sit deep."
     if leading and sum(momentum) < 0:
         action += (
             f" We lead but lost the last {MOMENTUM_WINDOW_MIN} minutes, so "
@@ -851,6 +926,9 @@ def coach_offline(
         {
             "finding": "scoreline",
             "action": action,
+            "tradeoff": tradeoff,
+            "alternative": alternative,
+            "alternative_tradeoff": alternative_tradeoff,
             "watch": (
                 "Their xG for the second half under "
                 f"{targets['opponent_second_half_xg_below']}."
@@ -1067,13 +1145,18 @@ number is discarded.
 COACH_INSTRUCTIONS = """\
 You are the assistant coach writing the half-time briefing for the focus team.
 Turn the findings into exactly three changes for the second half, one per
-finding. Each change names real players from the squad list and is something a
-coach can say in the dressing room. Return a JSON list of {finding, action,
-watch}, all three strings. finding is the id of the finding the change
-answers ("press", "threat" or "scoreline"), not its title. watch is one
-sentence naming a measurable target for the second half, taken from
-"targets". Quote numbers only as they appear in the input; never calculate or
-invent one. A reply with any other number is discarded.
+finding. You advise, the head coach decides, so each change offers two
+options with their trade-off rather than one order. Each option names real
+players from the squad list and is something a coach can say in the dressing
+room. Return a JSON list of {finding, action, tradeoff, alternative,
+alternative_tradeoff, watch}, all strings. finding is the id of the finding
+the change answers ("press", "threat" or "scoreline"), not its title. action
+is the option you recommend and tradeoff its cost; alternative is the other
+option and alternative_tradeoff its cost. watch is one sentence naming a
+measurable target for the second half, taken from "targets", that tells the
+coach whether either option worked. Quote numbers only as they appear in the
+input; never calculate or invent one. A reply with any other number is
+discarded.
 """
 
 FAN_INSTRUCTIONS = """\

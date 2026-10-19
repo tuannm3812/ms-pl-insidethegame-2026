@@ -3,7 +3,7 @@
 A multi-agent app that turns synthetic football events into an explained half-time briefing.
 The same intelligence goes to two audiences:
 
-- **Analyst mode**: three changes for the second half, each backed by evidence and a measurable target.
+- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence and a measurable target.
 - **Fan mode**: a short story about your team and favourite player, in your language.
 
 Built for the Microsoft x Premier League *Inside the Game* hackathon.

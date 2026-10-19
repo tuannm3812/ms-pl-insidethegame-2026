@@ -837,3 +837,34 @@ screenshots still render with only the favicon 404. `ruff format --check`,
 **Not done.** Codex suggested browser regression tests. The repo has no
 browser test harness and adding one would widen this PR, so the three
 scenarios were run as a one-off script, not added to CI.
+
+## 2026-10-19 · Claude · Coach offers two options per finding (PR #8)
+
+**Why.** Research on 2026 practice (project file
+`research/2026_update.md`): the Fantasy Premier League Companion "offers a
+range of options rather than one definitive answer" and is "not an
+autopilot"; club analysts advise and the head coach decides. One order per
+finding read as the agent deciding for the coach.
+
+**Changed.** `halftime/agents.py`: each coach change now carries `action`
+(the recommended option), `tradeoff` (its cost), `alternative`,
+`alternative_tradeoff` and `watch`. `check_changes` requires all five as
+non-empty text (`CHANGE_TEXT_FIELDS`); the error names the fields.
+`coach_offline` fills both options for every branch (press for or against
+us, threat for or against us, weak link or runner). `COACH_INSTRUCTIONS`
+asks the model for the same shape and says the head coach decides.
+`static/index.html`: each change is headed by the finding title and shows
+Option A (recommended, with cost) beside Option B (with cost) above the
+Watch target; the heading no longer repeats the action. README line on
+analyst mode updated.
+
+**Verified.** `ruff format --check`, `ruff check`, `pytest` (39 passed;
+offline test now checks the two options differ and both trade-offs are
+set, and `check_changes` rejects a change missing `alternative`). Offline
+server screenshot of seed 27 analyst mode at 1280 px shows all three
+changes with both options (`research/coach_options.png` in the project
+files). Seed 27 storyline unchanged: no generator or metrics change.
+
+**Open.** Not yet tested against the live model; the new fields are plain
+text so the fallback path is the risk if gpt-4.1-mini omits one. The 60'
+verify step (does the chosen option work?) is the next change.
