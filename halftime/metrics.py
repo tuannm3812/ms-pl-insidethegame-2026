@@ -58,6 +58,22 @@ def ppda(events: list[dict], pressing_side: str) -> float | None:
     return round(opp_passes / actions, 1) if actions else None
 
 
+def press_resistance(passes: list[dict]) -> dict:
+    """How a team's passing holds up when the passer is under pressure.
+
+    Returns the number of pressured passes and the share completed, so a
+    press can be judged by what it does to the ball, not only by its volume.
+    """
+    pressured = [e for e in passes if e.get("under_pressure")]
+    done = [e for e in pressured if e["outcome"] == "complete"]
+    return {
+        "passes_under_pressure": len(pressured),
+        "pass_accuracy_under_pressure": (
+            round(len(done) / len(pressured), 3) if pressured else None
+        ),
+    }
+
+
 def team_summary(events: list[dict], side: str) -> dict:
     """Headline team stats (goals, xG, passing, xT, PPDA) for one side."""
     mine = [e for e in events if e["team"] == side]
@@ -96,6 +112,7 @@ def team_summary(events: list[dict], side: str) -> dict:
         if all_passes
         else None,
         "xt_created": round(sum(max(0, pass_xt(e)) for e in done), 3),
+        **press_resistance(passes),
         "ppda": ppda(events, side),
         "pressures": sum(1 for e in mine if e["type"] == "pressure"),
         "high_presses": sum(
@@ -321,6 +338,44 @@ def key_moments(events: list[dict], limit: int = 8) -> list[dict]:
     for m in top:
         m.pop("weight")
     return top
+
+
+MOMENTS_PER_FINDING = 3
+
+
+def moments_for_finding(finding: dict, key_moments: list[dict]) -> list[dict]:
+    """The key moments an analyst would clip for one finding.
+
+    A press finding takes moments after the switch; a threat finding takes
+    the dominant side's moments after it; the scoreline finding takes goals
+    and big chances. Short lists are topped up with the earliest moments so
+    every finding has something to watch.
+    """
+    t = finding.get("minute", 0)
+    team = finding.get("team")
+    if finding["id"] == "press":
+        picked = [m for m in key_moments if m["minute"] >= t]
+    elif finding["id"] == "threat":
+        picked = [
+            m for m in key_moments if m["minute"] >= t and m["team"] == team
+        ]
+    else:
+        picked = [
+            m
+            for m in key_moments
+            if m["kind"] in ("goal", "big_chance_missed")
+        ]
+    for m in key_moments:
+        if len(picked) >= MOMENTS_PER_FINDING:
+            break
+        if m not in picked:
+            picked.append(m)
+    picked.sort(key=lambda m: (m["minute"], m["second"]))
+    return [
+        {k: m[k] for k in ("minute", "second", "kind", "team", "player")}
+        | ({"receiver": m["receiver"]} if "receiver" in m else {})
+        for m in picked[:MOMENTS_PER_FINDING]
+    ]
 
 
 def threat_channels(events: list[dict], side: str) -> dict:

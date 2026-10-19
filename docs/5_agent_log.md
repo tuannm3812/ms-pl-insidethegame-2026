@@ -837,3 +837,62 @@ screenshots still render with only the favicon 404. `ruff format --check`,
 **Not done.** Codex suggested browser regression tests. The repo has no
 browser test harness and adding one would widen this PR, so the three
 scenarios were run as a one-off script, not added to CI.
+
+## 2026-10-19 · Claude · Coach offers two options per finding (PR #8)
+
+**Why.** Research on 2026 practice (project file
+`research/2026_update.md`): the Fantasy Premier League Companion "offers a
+range of options rather than one definitive answer" and is "not an
+autopilot"; club analysts advise and the head coach decides. One order per
+finding read as the agent deciding for the coach.
+
+**Changed.** `halftime/agents.py`: each coach change now carries `action`
+(the recommended option), `tradeoff` (its cost), `alternative`,
+`alternative_tradeoff` and `watch`. `check_changes` requires all five as
+non-empty text (`CHANGE_TEXT_FIELDS`); the error names the fields.
+`coach_offline` fills both options for every branch (press for or against
+us, threat for or against us, weak link or runner). `COACH_INSTRUCTIONS`
+asks the model for the same shape and says the head coach decides.
+`static/index.html`: each change is headed by the finding title and shows
+Option A (recommended, with cost) beside Option B (with cost) above the
+Watch target; the heading no longer repeats the action. README line on
+analyst mode updated.
+
+**Verified.** `ruff format --check`, `ruff check`, `pytest` (39 passed;
+offline test now checks the two options differ and both trade-offs are
+set, and `check_changes` rejects a change missing `alternative`). Offline
+server screenshot of seed 27 analyst mode at 1280 px shows all three
+changes with both options (`research/coach_options.png` in the project
+files). Seed 27 storyline unchanged: no generator or metrics change.
+
+**Open.** Not yet tested against the live model; the new fields are plain
+text so the fallback path is the risk if gpt-4.1-mini omits one. The 60'
+verify step (does the chosen option work?) is the next change.
+
+## 2026-10-19 · Claude · Clips per finding and press resistance (follow-up to PR #8)
+
+**Why.** Club analysts hand the coach two or three timestamped clips per
+message, and Opta Forum 2026 was dominated by press resistance. Both
+are cheap from the events we already have.
+
+**Changed.** `halftime/metrics.py`: `press_resistance(passes)` returns
+`passes_under_pressure` and `pass_accuracy_under_pressure`; `team_summary`
+includes both, so the turning point carries them before and after.
+`moments_for_finding` picks up to three key moments for a finding (press:
+after the switch; threat: the dominant side's after the switch; scoreline:
+goals and big chances), topped up from the rest so no finding is empty.
+`halftime/agents.py`: the press finding's evidence adds the victim's
+pressured-pass count and accuracy before and after; the pipeline attaches
+`moments` to every finding in code after the tactics step, model or not.
+`static/index.html`: a "Clips" row under each change (clock, player,
+receiver, kind, team colour).
+
+**Verified.** Ruff format and check clean; `pytest` 40 passed (new test
+checks pressured-pass counts against the raw events and the empty case;
+the offline analyst test checks each finding has one to three moments in
+clock order and the press clips are after the switch). Offline screenshot
+of seed 27 analyst mode shows the new chips and clip rows. Storyline
+unchanged: seed 27 still turns at 25' with the away press.
+
+**Open.** Clips are listed, not linked to the replay; the overlay cards do
+not yet show them.

@@ -156,6 +156,17 @@
   .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary);
           font-variant-numeric: tabular-nums; }
   .chip b { color: var(--text-primary); font-weight: 650; }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+  .option { padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid transparent; font-size: 13px; }
+  .option.rec { border-color: var(--accent); }
+  .option > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
+  .option .pick { margin-left: 6px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+  .option p { margin: 4px 0 0; }
+  .option .cost { color: var(--text-secondary); }
+  .option .cost b { font-weight: 700; margin-right: 4px; }
+  @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  .moments { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .moments > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; font-family: var(--font-display); }
   .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
   .watch b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; margin-right: 4px; }
   .fan h3 { font-size: 32px; font-weight: 800; margin: 0 0 10px; line-height: 1.25; }
@@ -322,7 +333,7 @@ const ROLES = {
   stats: "Reads every event and computes the numbers",
   tactics: "Finds what changed and when",
   explainer: "Explains why each finding matters",
-  coach: "Picks three changes for the second half",
+  coach: "Offers two options per finding, with trade-offs",
   fan: "Writes the story for one supporter",
   overlay: "Builds timed broadcast graphics",
 };
@@ -527,19 +538,31 @@ function evidenceChips(f) {
   }).join("");
 }
 
+const KINDS = { goal: "goal", big_chance_missed: "big chance", threat_pass: "threat pass" };
+function momentChips(f) {
+  if (!f.moments || !f.moments.length) return "";
+  const clock = (m) => `${m.minute}:${String(m.second).padStart(2, "0")}`;
+  return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
+}
+
 const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
   if (d.mode === "analyst") {
-    $("out").innerHTML = LOADER + `<h2>Three changes for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
+    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
       const f = finds[c.finding] || {}, x = expl[c.finding] || {};
       const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
-      return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(c.action)}</span></h3>
-        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}<span class="tag">${esc(f.title || "")}</span></div>
+      return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(f.title || c.action)}</span></h3>
+        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}</div>
         <div class="body"><p>${esc(x.why_it_matters || "")}</p>
         <div class="chips">${evidenceChips(f)}</div>
-        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div></div></div>`;
+        <div class="options">
+          <div class="option rec"><b>Option A</b><span class="pick">recommended</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
+          <div class="option"><b>Option B</b><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
+        </div>
+        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
+        ${momentChips(f)}</div></div>`;
     }).join("") + "</div>";
   } else {
     const fan = d.fan, rtl = fan.language === "ar";

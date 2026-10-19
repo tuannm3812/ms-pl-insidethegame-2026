@@ -79,6 +79,16 @@ def test_analyst_briefing_offline(match, focus):
     assert len(out["changes"]) == 3
     squad = {p["name"] for p in match["teams"][focus]["players"]}
     assert any(name in out["changes"][0]["action"] for name in squad)
+    for c in out["changes"]:
+        assert c["action"] != c["alternative"]
+        assert c["tradeoff"] and c["alternative_tradeoff"]
+    for f in out["findings"]:
+        assert 1 <= len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
+        assert f["moments"] == sorted(
+            f["moments"], key=lambda m: (m["minute"], m["second"])
+        )
+    press = out["findings"][0]
+    assert all(m["minute"] >= press["minute"] for m in press["moments"])
     assert [t["agent"] for t in out["trace"]] == [
         "stats",
         "tactics",
@@ -86,6 +96,25 @@ def test_analyst_briefing_offline(match, focus):
         "coach",
         "overlay",
     ]
+
+
+def test_press_resistance_counts_pressured_passes(match):
+    ev = metrics.window(match["events"])
+    for side in metrics.SIDES:
+        s = metrics.team_summary(ev, side)
+        pressured = [
+            e
+            for e in ev
+            if e["type"] == "pass"
+            and e["team"] == side
+            and e.get("under_pressure")
+        ]
+        assert s["passes_under_pressure"] == len(pressured)
+        assert 0 <= s["pass_accuracy_under_pressure"] <= 1
+    assert metrics.press_resistance([]) == {
+        "passes_under_pressure": 0,
+        "pass_accuracy_under_pressure": None,
+    }
 
 
 def test_fan_briefing_spotlights_player(match):
@@ -151,7 +180,14 @@ def test_agent_framework_path_uses_model_replies(match):
         for f in findings
     ]
     changes = [
-        {"finding": f["id"], "action": f"do {i}", "watch": "x"}
+        {
+            "finding": f["id"],
+            "action": f"do {i}",
+            "tradeoff": "costs",
+            "alternative": f"or {i}",
+            "alternative_tradeoff": "costs more",
+            "watch": "x",
+        }
         for i, f in enumerate(findings)
     ]
     client = ScriptedClient(
@@ -412,13 +448,25 @@ def test_free_numbers_and_watch_targets_are_checked(match):
 
 def test_coach_reply_rejection_names_the_bad_field():
     good = [
-        {"finding": f, "action": "Press higher.", "watch": "Win it back."}
+        {
+            "finding": f,
+            "action": "Press higher.",
+            "tradeoff": "Tired legs.",
+            "alternative": "Sit deeper.",
+            "alternative_tradeoff": "Less of the ball.",
+            "watch": "Win it back.",
+        }
         for f in ("press", "threat", "scoreline")
     ]
     assert check_changes(good) == good
+    one_order = [
+        {k: v for k, v in c.items() if k != "alternative"} for c in good
+    ]
+    with pytest.raises(ValueError, match="alternative"):
+        check_changes(one_order)
     titled = [dict(c, finding="Away side presses high") for c in good]
     with pytest.raises(ValueError, match="finding must be one of"):
         check_changes(titled)
     target = [dict(c, watch={"metric": "xg", "below": 1}) for c in good]
-    with pytest.raises(ValueError, match="action and watch must be"):
+    with pytest.raises(ValueError, match="watch must be"):
         check_changes(target)
