@@ -100,6 +100,23 @@ def test_analyst_briefing_offline(match, focus):
     ]
 
 
+def test_team_report_rows_match_the_summary(match):
+    facts = metrics.half_time_facts(match)
+    for focus in metrics.SIDES:
+        r = metrics.team_report(facts, focus)
+        opp = metrics.other(focus)
+        rows = {x["key"]: x for x in r["attack"] + r["defence"]}
+        assert rows["xg"]["us"] == facts["summary"][focus]["xg"]
+        assert rows["xg_conceded"]["us"] == facts["summary"][opp]["xg"]
+        assert rows["ppda"]["better"] == "lower"
+        tp = facts["turning_point"]
+        mins = tp["before"][focus]["minutes"]
+        assert rows["shots"]["us_before"] == round(
+            10 * tp["before"][focus]["shots"] / mins, 2
+        )
+        assert rows["possession_pct"]["split_unit"] == ""
+
+
 def test_press_resistance_counts_pressured_passes(match):
     ev = metrics.window(match["events"])
     for side in metrics.SIDES:

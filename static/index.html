@@ -238,6 +238,18 @@
   #tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
          border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none;
          box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 10; max-width: 240px; }
+  .teamgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .teamgrid h3 { font-size: 15px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+  table.report { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.report td, table.report th { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+  table.report th { font-weight: 600; color: var(--text-secondary); font-size: 12px; }
+  table.report th:first-child, table.report td:first-child { text-align: left; }
+  table.report .up { color: var(--hi); font-weight: 700; }
+  table.report .down { color: var(--away); font-weight: 700; }
+  table.report td:last-child { white-space: nowrap; }
+  table.report .unit { color: var(--text-secondary); font-size: 11px; }
+  .teamnote { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
+  @media (max-width: 760px) { .teamgrid { grid-template-columns: 1fr; } }
   table.data { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   table.data td, table.data th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
   table.data th:first-child, table.data td:first-child { text-align: left; }
@@ -307,6 +319,10 @@
     <div class="stack">
       <section class="card" id="out" aria-live="polite">
         <div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>
+      </section>
+      <section class="card" id="teamCard" hidden>
+        <h2 id="teamHead">Team report</h2>
+        <div class="teamgrid" id="team"></div>
       </section>
       <section class="card" id="liveCard" hidden>
         <h2>Live event feed</h2>
@@ -475,11 +491,39 @@ function render() {
   drawPitch(d.shots, d.teams);
   drawBars(d.summary);
   renderOutput(d);
+  renderTeam(d);
   renderTv(d.overlays, 0);
   $("tvPlay").disabled = false;
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
     d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+}
+
+// Team report: attack and defence rows for both sides, with the focus team's
+// rate before and after the turning point. Arrows are coloured by whether the
+// change is good for the focus team, using the "better" direction from code.
+function renderTeam(d) {
+  const r = d.team_report;
+  $("teamCard").hidden = d.mode !== "analyst" || !r;
+  if (!r || d.mode !== "analyst") return;
+  const opp = d.focus === "home" ? "away" : "home", t = r.turning_point;
+  const fmt = (v) => (v === null || v === undefined ? "n/a" : v);
+  const short = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
+  $("teamHead").textContent = `Team report · ${d.focus_team}`;
+  const table = (title, rows) => `<div><h3>${title}</h3><table class="report">
+    <tr><th></th><th>${esc(short(d.focus))}</th><th>${esc(short(opp))}</th><th>${esc(short(d.focus))} 0–${t}' → ${t}'+</th></tr>` +
+    rows.map((x) => {
+      let cls = "", arrow = "→";
+      if (x.us_before !== null && x.us_after !== null && x.us_before !== x.us_after) {
+        const rose = x.us_after > x.us_before;
+        arrow = rose ? "▲" : "▼";
+        cls = rose === (x.better === "higher") ? "up" : "down";
+      }
+      return `<tr><td>${esc(x.label)}</td><td><b>${esc(fmt(x.us))}</b></td><td>${esc(fmt(x.them))}</td>
+        <td>${esc(fmt(x.us_before))} <span class="${cls}">${arrow}</span> ${esc(fmt(x.us_after))}${x.split_unit ? `<span class="unit">*</span>` : ""}</td></tr>`;
+    }).join("") + "</table></div>";
+  $("team").innerHTML = table("Attacking", r.attack) + table("Defending", r.defence);
+  $("team").insertAdjacentHTML("beforeend", `<p class="teamnote" style="grid-column:1/-1">Green arrows are changes that help ${esc(d.focus_team)}, red ones hurt. * Counts are per 10 minutes either side of the turning point at ${t}', so the two spells compare fairly. PPDA is opponent passes per defensive action: lower means a more intense press.</p>`);
 }
 
 function drawMomentum(tl, tp, upto = 45) {

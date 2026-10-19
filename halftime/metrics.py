@@ -423,6 +423,88 @@ def shot_map(events: list[dict]) -> list[dict]:
     ]
 
 
+# (key, label, better) per section. "better" says which way is good for the
+# team the row describes, so the page can colour a change without guessing.
+ATTACK_ROWS = (
+    ("goals", "Goals", "higher"),
+    ("xg", "Expected goals (xG)", "higher"),
+    ("shots", "Shots", "higher"),
+    ("big_chances", "Big chances", "higher"),
+    ("xt_created", "Threat created (xT)", "higher"),
+    ("possession_pct", "Possession %", "higher"),
+    ("pass_accuracy", "Pass accuracy", "higher"),
+    ("pass_accuracy_under_pressure", "Pass accuracy under pressure", "higher"),
+)
+DEFENCE_ROWS = (
+    ("ppda", "PPDA", "lower"),
+    ("high_presses", "High presses", "higher"),
+    ("pressures", "Pressures", "higher"),
+    ("xg_conceded", "xG conceded", "lower"),
+    ("turnovers_in_own_half", "Balls lost in own half", "lower"),
+)
+
+
+def team_report(facts: dict, focus: str) -> dict:
+    """Attacking and defending rows for both teams, split at the turning point.
+
+    Each row carries the focus team's and the opponent's value for the half,
+    plus the focus team's value before and after the turning point as a
+    per-minute rate where the raw count would depend on the window length.
+    """
+    opp = other(focus)
+    tp = facts["turning_point"]
+    rate_keys = {
+        "goals",
+        "shots",
+        "big_chances",
+        "xt_created",
+        "high_presses",
+        "pressures",
+        "turnovers_in_own_half",
+        "xg",
+        "xg_conceded",
+    }
+
+    def value(summary: dict, side: str, key: str) -> float | None:
+        if key == "xg_conceded":
+            return summary[other(side)]["xg"]
+        return summary[side][key]
+
+    def per_10(v: float | None, minutes: float) -> float | None:
+        return None if v is None or not minutes else round(10 * v / minutes, 2)
+
+    def rows(spec: tuple) -> list[dict]:
+        out = []
+        for key, label, better in spec:
+            before = value(tp["before"], focus, key)
+            after = value(tp["after"], focus, key)
+            rated = key in rate_keys
+            if rated:
+                before = per_10(before, tp["before"][focus]["minutes"])
+                after = per_10(after, tp["after"][focus]["minutes"])
+            out.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "better": better,
+                    "us": value(facts["summary"], focus, key),
+                    "them": value(facts["summary"], opp, key),
+                    "us_before": before,
+                    "us_after": after,
+                    "split_unit": "per 10 min" if rated else "",
+                }
+            )
+        return out
+
+    return {
+        "focus": focus,
+        "turning_point": tp["minute"],
+        "attack": rows(ATTACK_ROWS),
+        "defence": rows(DEFENCE_ROWS),
+        "threat_channels": facts["threat_channels"],
+    }
+
+
 def half_time_facts(match: dict) -> dict:
     """Everything the agents need about the first half, as plain JSON."""
     ev = window(match["events"])
