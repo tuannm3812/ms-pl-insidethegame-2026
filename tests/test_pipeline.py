@@ -117,6 +117,47 @@ def test_team_report_rows_match_the_summary(match):
         assert rows["possession_pct"]["split_unit"] == ""
 
 
+def test_player_cards_cover_the_squad_and_add_up(match):
+    ev = metrics.window(match["events"])
+    for side in metrics.SIDES:
+        cards = metrics.player_cards(ev, match, side)
+        squad = match["teams"][side]["players"]
+        assert [c["id"] for c in cards] == [p["id"] for p in squad]
+        assert sorted(c["xt_rank"] for c in cards) == list(
+            range(1, len(squad) + 1)
+        )
+        for c in cards:
+            hm = c["heatmap"]
+            assert len(hm["grid"]) == metrics.HEAT_ROWS
+            assert all(len(r) == metrics.HEAT_COLS for r in hm["grid"])
+            assert sum(map(sum, hm["grid"])) == hm["actions"]
+            assert c["name"] in c["insight"]
+        gk = cards[0]
+        assert gk["position"] == "GK"
+        assert gk["heatmap"]["thirds_pct"]["final"] == 0
+    received = sum(
+        1
+        for e in ev
+        if e["type"] == "pass"
+        and e["outcome"] == "complete"
+        and e["receiver"] == "Silva"
+        and e["team"] == "home"
+    )
+    silva = next(
+        c
+        for c in metrics.player_cards(ev, match, "home")
+        if c["name"] == "Silva"
+    )
+    own = sum(
+        1
+        for e in ev
+        if e.get("player") == "Silva"
+        and e["team"] == "home"
+        and e["type"] in metrics.ACTION_TYPES
+    )
+    assert silva["heatmap"]["actions"] == own + received
+
+
 def test_press_resistance_counts_pressured_passes(match):
     ev = metrics.window(match["events"])
     for side in metrics.SIDES:

@@ -1598,6 +1598,9 @@ async def half_time_briefing(
         "findings": findings,
         "explanations": explanations,
         "team_report": metrics.team_report(facts, focus),
+        "player_cards": metrics.player_cards(
+            metrics.window(match["events"]), match, focus
+        ),
     }
     if mode == "analyst":
         squad = [

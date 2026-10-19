@@ -250,6 +250,20 @@
   table.report .unit { color: var(--text-secondary); font-size: 11px; }
   .teamnote { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
   @media (max-width: 760px) { .teamgrid { grid-template-columns: 1fr; } }
+  .squad { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .squad button { font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border);
+                  background: var(--surface-1); color: var(--text-secondary); cursor: pointer; }
+  .squad button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .squad button .pos { opacity: .7; margin-left: 4px; font-size: 11px; }
+  .pcard { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pcard svg { width: 100%; height: auto; display: block; }
+  .pcard h3 { margin: 0 0 4px; font-size: 18px; }
+  .pcard .insight { font-size: 14px; color: var(--text-primary); margin: 6px 0 10px; }
+  .pcard .depth { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0 2px; background: var(--surface-2); }
+  .pcard .depth span { display: block; }
+  .pcard .depthlab { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+  .pcard .pnote { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+  @media (max-width: 760px) { .pcard { grid-template-columns: 1fr; } }
   table.data { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   table.data td, table.data th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
   table.data th:first-child, table.data td:first-child { text-align: left; }
@@ -324,6 +338,11 @@
         <h2 id="teamHead">Team report</h2>
         <div class="teamgrid" id="team"></div>
       </section>
+      <section class="card" id="playersCard" hidden>
+        <h2 id="playersHead">Players</h2>
+        <div class="squad" id="squad" role="tablist" aria-label="Choose a player"></div>
+        <div class="pcard" id="pcard"></div>
+      </section>
       <section class="card" id="liveCard" hidden>
         <h2>Live event feed</h2>
         <div class="feed" id="feed"></div>
@@ -348,7 +367,7 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null };
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, card: null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tip = $("tip");
@@ -492,11 +511,82 @@ function render() {
   drawBars(d.summary);
   renderOutput(d);
   renderTeam(d);
+  renderPlayers(d);
   renderTv(d.overlays, 0);
   $("tvPlay").disabled = false;
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
     d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+}
+
+// Player cards: a squad picker, an action heatmap in the player's attacking
+// frame, the card's numbers and an insight written in code.
+function renderPlayers(d) {
+  const cards = d.player_cards || [];
+  $("playersCard").hidden = !cards.length;
+  if (!cards.length) return;
+  $("playersHead").textContent = `Players · ${d.focus_team}`;
+  const fav = d.mode === "fan" && state.player && cards.find((c) => c.name === state.player);
+  const keep = cards.find((c) => c.id === state.card);
+  const best = cards.reduce((a, c) => (c.stats.xt_created > a.stats.xt_created ? c : a), cards[0]);
+  state.card = (fav || keep || best).id;
+  $("squad").innerHTML = cards.map((c) => `<button role="tab" data-id="${esc(c.id)}" aria-selected="${c.id === state.card}">${esc(c.name)}<span class="pos">${esc(c.position)}</span></button>`).join("");
+  $("squad").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    state.card = b.dataset.id;
+    $("squad").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    drawPlayerCard(d, cards.find((c) => c.id === state.card));
+  }));
+  drawPlayerCard(d, cards.find((c) => c.id === state.card));
+}
+
+const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
+
+function drawPlayerCard(d, c) {
+  const st = c.stats, hm = c.heatmap, color = d.focus === "away" ? "var(--away)" : "var(--home)";
+  const s = 5, cw = 105 / hm.grid[0].length, rh = 68 / hm.grid.length;
+  const max = Math.max(1, ...hm.grid.flat());
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 525 360"); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${c.name} action heatmap, attacking left to right`);
+  const line = { fill: "none", stroke: "var(--pitch-line)", "stroke-width": 1.5 };
+  el("rect", { x: 0, y: 0, width: 525, height: 340, fill: "var(--pitch)", rx: 6 }, svg);
+  const defs = el("defs", {}, svg), uid = "heat" + c.id;
+  el("feGaussianBlur", { stdDeviation: 9 }, el("filter", { id: uid + "b", x: "-10%", y: "-10%", width: "120%", height: "120%" }, defs));
+  el("rect", { width: 525, height: 340, rx: 6 }, el("clipPath", { id: uid + "c" }, defs));
+  const layer = el("g", { filter: `url(#${uid}b)`, "clip-path": `url(#${uid}c)` }, el("g", { "clip-path": `url(#${uid}c)` }, svg));
+  // Row 0 is y = 0, the right touchline when attacking left to right, so it is
+  // drawn at the bottom.
+  hm.grid.forEach((row, r) => row.forEach((n, col) => {
+    if (!n) return;
+    const cell = el("rect", { x: col * cw * s, y: (68 - (r + 1) * rh) * s, width: cw * s, height: rh * s,
+                              fill: color, "fill-opacity": (0.1 + 0.85 * n / max).toFixed(2) }, layer);
+    cell.addEventListener("mousemove", (e) => showTip(e, `${n} action${n === 1 ? "" : "s"}`));
+    cell.addEventListener("mouseleave", hideTip);
+  }));
+  el("rect", { x: 1, y: 1, width: 523, height: 338, ...line }, svg);
+  el("line", { x1: 262.5, x2: 262.5, y1: 0, y2: 340, ...line }, svg);
+  el("circle", { cx: 262.5, cy: 170, r: 45.75, ...line }, svg);
+  for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
+  el("text", { x: 262.5, y: 355, "text-anchor": "middle" }, svg).textContent = "Attacking →";
+  const t = hm.thirds_pct;
+  const acc = st.pass_accuracy === null ? "n/a" : Math.round(st.pass_accuracy * 100) + "%";
+  const chips = [
+    ["Passes", `${st.passes_complete}/${st.passes} (${acc})`],
+    ["Threat (xT)", `${st.xt_created} · ${ordinal(c.xt_rank)} in team`],
+    ["Shots", `${st.shots} (xG ${st.xg})`],
+    ["Pressures", st.pressures],
+    ["Tackles + interceptions", st.defensive_actions],
+    ["Lost in own half", st.lost_ball_in_own_half],
+  ];
+  if (st.top_sprint_kmh) chips.push(["Top sprint", st.top_sprint_kmh + " km/h"]);
+  $("pcard").innerHTML = `<div class="pitchwrap"></div><div>
+    <h3>${esc(c.name)} <span class="muted">#${c.number} · ${esc(c.position)}</span></h3>
+    <p class="insight">${esc(c.insight)}</p>
+    <div class="chips">${chips.map(([k, v]) => `<span class="chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
+    <div class="depth" aria-hidden="true"><span style="flex:${t.defensive};background:${color};opacity:.35"></span><span style="flex:${t.middle};background:${color};opacity:.65"></span><span style="flex:${t.final};background:${color}"></span></div>
+    <div class="depthlab"><span>Own third ${t.defensive}%</span><span>Middle ${t.middle}%</span><span>Final third ${t.final}%</span></div>
+    <p class="pnote">${hm.actions} first-half actions: passes, shots, pressures, tackles and interceptions where they happened, plus passes received. Event data, not tracking; the synthetic generator models depth, not which flank a player plays on.</p></div>`;
+  $("pcard").querySelector(".pitchwrap").appendChild(svg);
 }
 
 // Team report: attack and defence rows for both sides, with the focus team's

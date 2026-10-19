@@ -280,6 +280,157 @@ def player_stats(events: list[dict], match: dict) -> dict:
     return stats
 
 
+HEAT_COLS, HEAT_ROWS = 12, 8
+ACTION_TYPES = {"pass", "shot", "pressure", "tackle", "interception", "foul"}
+
+
+def _channel(y: float) -> str:
+    """Channel in the attacking frame, matching `threat_channels`."""
+    if y < 68 / 3:
+        return "right"
+    if y > 2 * 68 / 3:
+        return "left"
+    return "centre"
+
+
+def player_heatmaps(events: list[dict], match: dict) -> dict:
+    """Where each player acted, as a coarse grid in their attacking frame.
+
+    Counts the player's own actions (passes, shots, pressures, tackles,
+    interceptions, fouls) at their start point, plus completed passes they
+    received at the end point. This is event data, not tracking: it shows
+    where a player touched the game, not where they stood.
+
+    Returns, by player id, the grid (``HEAT_ROWS`` rows by ``HEAT_COLS``
+    columns, row 0 at y = 0), the action count, the shares of actions in
+    each third and channel, and the average x.
+    """
+    names = {
+        (side, p["name"]): p["id"]
+        for side in SIDES
+        for p in match["teams"][side]["players"]
+    }
+    points: dict[str, list[tuple[float, float]]] = {
+        pid: [] for pid in names.values()
+    }
+    for e in events:
+        if e["type"] in ACTION_TYPES and e.get("player_id") in points:
+            points[e["player_id"]].append((e["x"], e["y"]))
+        if (
+            e["type"] == "pass"
+            and e["outcome"] == "complete"
+            and (e["team"], e.get("receiver")) in names
+        ):
+            pid = names[(e["team"], e["receiver"])]
+            points[pid].append((e["end_x"], e["end_y"]))
+    out = {}
+    for pid, pts in points.items():
+        grid = [[0] * HEAT_COLS for _ in range(HEAT_ROWS)]
+        thirds = {"defensive": 0, "middle": 0, "final": 0}
+        channels = {"right": 0, "centre": 0, "left": 0}
+        for x, y in pts:
+            col = min(HEAT_COLS - 1, max(0, int(x / 105 * HEAT_COLS)))
+            row = min(HEAT_ROWS - 1, max(0, int(y / 68 * HEAT_ROWS)))
+            grid[row][col] += 1
+            third = "defensive" if x < 35 else "final" if x >= 70 else "middle"
+            thirds[third] += 1
+            channels[_channel(y)] += 1
+        n = len(pts)
+        out[pid] = {
+            "grid": grid,
+            "actions": n,
+            "avg_x": round(sum(x for x, _ in pts) / n, 1) if n else None,
+            "thirds_pct": {
+                k: round(100 * v / n, 1) if n else 0.0
+                for k, v in thirds.items()
+            },
+            "channels_pct": {
+                k: round(100 * v / n, 1) if n else 0.0
+                for k, v in channels.items()
+            },
+        }
+    return out
+
+
+def player_cards(events: list[dict], match: dict, side: str) -> list[dict]:
+    """One card per player of a side: stats, heatmap and a computed insight.
+
+    The insight is written in code from the numbers on the card, so it can
+    sit next to model output without being checked.
+    """
+    stats = player_stats(events, match)
+    heat = player_heatmaps(events, match)
+    squad = [p for p in match["teams"][side]["players"]]
+    xt_rank = sorted(
+        (p["id"] for p in squad),
+        key=lambda pid: -stats[pid]["xt_created"],
+    )
+    losses_rank = sorted(
+        (p["id"] for p in squad),
+        key=lambda pid: -stats[pid]["lost_ball_in_own_half"],
+    )
+    cards = []
+    for p in squad:
+        st, hm = stats[p["id"]], heat[p["id"]]
+        cards.append(
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "position": p["position"],
+                "number": p["number"],
+                "stats": st,
+                "heatmap": hm,
+                "xt_rank": xt_rank.index(p["id"]) + 1,
+                "insight": _player_insight(
+                    p,
+                    st,
+                    hm,
+                    xt_rank.index(p["id"]) + 1,
+                    losses_rank.index(p["id"]) + 1,
+                ),
+            }
+        )
+    return cards
+
+
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def _player_insight(
+    p: dict, st: dict, hm: dict, xt_rank: int, losses_rank: int
+) -> str:
+    """Two plain sentences on where a player worked and what stood out."""
+    name = p["name"]
+    if not hm["actions"]:
+        return f"{name} was barely involved in the first half."
+    # Depth only: the generator picks who has the ball by third, not by
+    # flank, so a player's left-right spread is not meaningful yet.
+    third = max(hm["thirds_pct"], key=hm["thirds_pct"].get)
+    where = (
+        f"{name} did {hm['thirds_pct'][third]:g}% of their work in the "
+        f"{third} third"
+    )
+    if st["goals"]:
+        what = f"Scored {st['goals']} from {st['xg']} xG."
+    elif xt_rank <= 2 and st["xt_created"] > 0:
+        what = (
+            f"Created {st['xt_created']} xT, {_ordinal(xt_rank)} in the team."
+        )
+    elif losses_rank == 1 and st["lost_ball_in_own_half"]:
+        what = (
+            f"Lost the ball in our half {st['lost_ball_in_own_half']} "
+            "times, the most in the team."
+        )
+    elif st["pressures"] >= 8:
+        what = f"Pressed {st['pressures']} times."
+    else:
+        what = f"Completed {st['passes_complete']} of {st['passes']} passes."
+    return f"{where} ({hm['actions']} actions). {what}"
+
+
 def key_moments(events: list[dict], limit: int = 8) -> list[dict]:
     """Goals, big chances and other standout events, most important first."""
     moments = []
