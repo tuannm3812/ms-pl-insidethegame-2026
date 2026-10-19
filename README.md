@@ -3,7 +3,7 @@
 A multi-agent app that turns synthetic football events into an explained half-time briefing.
 The same intelligence goes to two audiences:
 
-- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence, clips to watch and a measurable target. Pick an option and **Check at 60'**: the verifier agent measures each target on the second half so far and says whether to keep or change.
+- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence, clips to watch and a measurable target. Pick an option and **Check at 60'**: the verifier agent measures each target on the second half so far and says whether to keep or change. Below the calls: **Pre-match vs now** (the real first half against the typical range from 60 simulations of the two teams' pre-match styles, plus a pre-match win/draw/loss estimate), a **Team report** (attacking and defending, before and after the turning point) and **Player cards** (action heatmap, stats and a computed insight for each player).
 - **Fan mode**: a short story about your team and favourite player, in your language.
 
 Built for the Microsoft x Premier League *Inside the Game* hackathon.

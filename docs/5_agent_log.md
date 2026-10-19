@@ -935,3 +935,48 @@ suggests switching; storyline unchanged.
 
 **Open.** Not run against the live model. The check minute is fixed at
 60' in the UI (the API accepts 46-90). The fan mode has no check yet.
+
+## 2026-10-19 · Claude · Team report, player cards, pre-match vs now (PR #9)
+
+**Why.** Mike asked for analysis by team (attacking and defending, and
+what changed from the pre-match picture) and by player (heatmap and
+insights), and chose to build all three in that order.
+
+**Changed.**
+- `halftime/metrics.py`: `team_report` (attacking and defending rows for
+  both sides, the focus team's value before and after the turning point,
+  counts as per-10-minute rates, and which direction is better);
+  `player_heatmaps` (12 x 8 grid of each player's actions plus passes
+  received, in their attacking frame, with shares by third and channel);
+  `player_cards` (stats, heatmap, team xT rank and a code-written insight).
+- `halftime/prematch.py` (new): `expectation` simulates 60 matches of
+  the default fixture with pre-match styles only (no 25' switch), giving
+  each first-half metric's mean and 10th to 90th percentile and a pre-match
+  win/draw/loss share; cached per process (about 2 s on first use).
+  `compare` grades the real half as above, below or as expected, says
+  whether that helps the focus team, and lists the changes furthest
+  outside the range first. Returns None for a fixture other than the
+  default one.
+- `halftime/agents.py`: the briefing returns `team_report`,
+  `player_cards` and `prematch`. No agent prompt changed.
+- `static/index.html`: Pre-match vs now card (range bar, expected tick,
+  actual dot coloured by good or bad for the focus team), Team report
+  card, Players card (squad picker, blurred heatmap, chips, depth bar;
+  fan mode opens on the favourite player).
+
+**Verified.** Ruff format and check clean; `pytest` 46 passed. New tests:
+team report rows equal the summary and the split rates; player cards
+cover the squad, grid sums equal the action count, a player's count is
+own actions plus passes received, the keeper never reaches the final
+third; pre-match flags Northgate's high presses as above range and first
+in `changes`, ranges contain the mean, and another fixture returns None.
+Desktop and 390 px screenshots of all three cards, no page errors. On
+seed 27 the pre-match card shows the storyline: Northgate high presses
+106 against an expected 46.3 (36 to 60), Riverside balls lost in own half
+52 against 31.4 (23 to 40).
+
+**Open.** The generator chooses the ball carrier by third, not by flank,
+so a player's left-right spread is noise (a RW can show more on the left);
+insights name the third only and the card says so. Fixing it means a
+generator change that alters seed 27's events. The new numbers are not
+yet passed to the model agents. Not run against the live model.

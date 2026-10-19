@@ -158,6 +158,29 @@ def test_player_cards_cover_the_squad_and_add_up(match):
     assert silva["heatmap"]["actions"] == own + received
 
 
+def test_prematch_flags_the_away_press(match):
+    from halftime import prematch
+
+    out = prematch.compare(match, "home")
+    rows = {(r["side"], r["key"]): r for r in out["rows"]}
+    press = rows[("away", "high_presses")]
+    # Seed 27's storyline: the away side was not expected to press high.
+    assert press["verdict"] == "above" and press["actual"] > press["high"]
+    assert press["good_for_focus"] is False
+    assert out["changes"][0]["key"] == "high_presses"
+    assert sum(out["prematch_win_pct"].values()) == pytest.approx(100)
+    for r in out["rows"]:
+        assert r["low"] <= r["expected"] <= r["high"]
+        inside = r["low"] <= r["actual"] <= r["high"]
+        assert (r["verdict"] == "as_expected") is inside
+    other_fixture = dict(match, teams={**match["teams"]})
+    other_fixture["teams"]["home"] = {
+        **match["teams"]["home"],
+        "name": "Elsewhere FC",
+    }
+    assert prematch.compare(other_fixture, "home") is None
+
+
 def test_press_resistance_counts_pressured_passes(match):
     ev = metrics.window(match["events"])
     for side in metrics.SIDES:

@@ -30,7 +30,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
-from . import metrics
+from . import metrics, prematch
 from .metrics import SIDES, other
 
 if TYPE_CHECKING:
@@ -1598,6 +1598,7 @@ async def half_time_briefing(
         "findings": findings,
         "explanations": explanations,
         "team_report": metrics.team_report(facts, focus),
+        "prematch": prematch.compare(match, focus),
         "player_cards": metrics.player_cards(
             metrics.window(match["events"]), match, focus
         ),
