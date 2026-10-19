@@ -665,3 +665,175 @@ alone cannot distinguish model use from a successful fallback.
 **Limits.** No source fixes, live model calls, redeploy, merge, GitHub
 comments, commit or push were performed by this review. Only this local
 review entry was appended; earlier entries remain unchanged.
+
+## 2026-10-18 · Claude · Front-end polish for the demo
+
+**Changed.** Only `static/index.html` and the three screenshots in `docs/`;
+no Python, API or agent output changed.
+
+- A full-width "agent pipeline" card under the controls shows the five
+  steps in run order with each one's role, backend and time, read from the
+  briefing's `trace`. Backends are labelled `code` (deterministic),
+  `model`, `rules` (offline) or `fallback` (a model reply was rejected,
+  detected by "failed" in the trace note). Steps reveal one after another
+  once the reply arrives; that animation is cosmetic, the times are real.
+- While a briefing is in flight the pipeline shows "Running", the output
+  card shows an elapsed-time counter, and the controls are disabled. A
+  request counter drops stale replies when the user switches quickly, and a
+  failed request shows an error instead of a blank card.
+- Broadcast-style scorebug with a clock; during the replay it ticks the
+  minute, updates the score on the goal and the shot map fills in as shots
+  happen.
+- The overlay cards (scorebug, stat bars, momentum, lower thirds) are drawn
+  in a 16:9 preview with play and per-card controls, at a third of their
+  real durations. The raw JSON stays under a disclosure.
+- The spell after the turning point is shaded on the momentum chart;
+  evidence chips bold the "after" value; fan output is right-to-left when
+  the fan agent returns Arabic.
+
+**Verified.** Headless Chromium against a local offline server (seed 27):
+analyst, fan, replay, overlay playback, dark mode and a 390 px viewport
+(no horizontal scroll). A mocked trace with two model steps and one
+fallback was used only to check how those states render; it is not a live
+result. No console errors besides the missing favicon. `ruff format
+--check`, `ruff check` and `pytest` (39 passed) are green.
+
+**Not verified.** Not run against the live Foundry backend, so the model
+backend label shows the client class name as `/api/health` reports it.
+
+## 2026-10-18 · Claude · New typeface and palette (PR #7)
+
+**Changed.** At Mike's request, `static/index.html` now uses Barlow for body
+text and Barlow Condensed for headings, the scorebug, numbers and overlay
+graphics, loaded from Google Fonts with a system-font fallback if the
+fonts cannot load. New palette in both themes: deep purple for the
+scorebug, buttons and badges, a green highlight (HT clock, section marks,
+overlay captions), and cyan for the home side and magenta for the away side
+instead of blue and orange (cyan and magenta stay distinct for the common
+colour-vision deficiencies; inferred, not tested with a simulator). The
+screenshots in `docs/` are refreshed.
+
+**Verified.** Headless Chromium on seed 27 in light and dark mode and at
+390 px (no horizontal scroll); `ruff format --check`, `ruff check` and
+`pytest` green.
+
+## 2026-10-19 · Codex · Review of Claude's UI PR #7, pass 6
+
+**Scope.** Reviewed [PR #7](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/7),
+`feat(ui): show the agent pipeline and polish the page for the demo`, from
+base `4a85a880dbffd1fb37ee8d4afbe7cb2ee4ab746b` to head
+`347abbacb90e6515a884c2c044278a590e5bb36b`. Checked the UI changes, screenshots
+and appended claims against `AGENTS.md` and the project standard. Reviewed
+an archived PR snapshot under `/private/tmp`; the main checkout stayed at
+`4a85a88`. An independent reviewer checked loading/error/pipeline behavior.
+
+**Findings.** Three P2 issues introduced in the UI change. File/line
+references are for the PR head. All were reproduced in actual headless
+Chromium using intercepted requests and code-generated offline fixtures;
+they are not inferred merely from reading the JavaScript.
+
+1. **P2 — A failed replay request permanently locks replay.**
+   `static/index.html:594-596` sets `state.replaying=true` and disables the
+   button before fetching events, without a catch/finally cleanup. Aborting
+   that request produces an unhandled `Failed to fetch`. After restoring
+   network responses and successfully switching focus to away, the page
+   still has `replaying=true` and the replay button remains disabled.
+   `setBusy` intentionally preserves that disabled state during later
+   briefings. Wrap replay in error handling and unconditional cleanup, show
+   an error, and check the HTTP status before treating the response as an
+   event array. Verify that replay can be retried without reloading the page.
+
+2. **P2 — Briefing failure removes the next request's loading indicator.**
+   `static/index.html:411` replaces the output with an empty loader and the
+   error, deleting `#elapsed`. A subsequent request's timer at
+   `static/index.html:383-385` then throws `Cannot set properties of null
+   (setting 'textContent')` every 100 ms. Reproduced with an initial 503
+   followed by a successful fan retry delayed 600 ms: six timer exceptions,
+   with the previous failure message still visible under an empty loader.
+   The successful reply eventually renders; this is not a permanent retry
+   failure. Preserve or recreate the complete loader and elapsed element
+   before starting another request. The same failure path also leaves all
+   pipeline nodes saying Running after the request has settled; clear that
+   state when presenting the error.
+
+3. **P2 — Overlay Play is active before its required data exists.**
+   `static/index.html:295` presents an enabled Play button outside the
+   controls disabled by `setBusy`. `static/index.html:575-576` immediately
+   accesses `state.data.overlays`. Clicking Play while the first briefing
+   is delayed produces `Cannot read properties of null (reading
+   'overlays')`. The model-backed initial load makes this a visible
+   interaction window. Disable overlay controls until a valid briefing is
+   available and guard the playback function. Include the initial failure
+   state in that check as well.
+
+**Verification.**
+
+- Exact snapshot: **39 tests passed in 1.49 s**, Python 3.15.0. Ruff
+  **0.16.8** format check reported **13 files already formatted** and lint
+  reported **All checks passed**. These checks do not exercise the new
+  browser interaction paths.
+- GitHub reported both `test` and `docker` successful. Rechecked PR #7's
+  head after the probes: still open at the reviewed SHA. No local Docker
+  build was performed. `git diff --check` additionally reports one cosmetic
+  trailing-whitespace line at `static/index.html:92`; it is not included
+  among the functional findings above.
+- Browser fixtures were generated from seed 27 through the unchanged
+  offline Python pipeline. All browser URLs were intercepted; external
+  resources, including Google Fonts, were blocked. No live model, Azure
+  endpoint or external font request was made by the probes.
+- The happy path had no page errors: overlay playback advanced to card 2;
+  replay completed with home 1-0 away and HT; a 390 px viewport had no
+  horizontal overflow with the system-font fallback. Saved and inspected
+  a full-page mobile screenshot under `/private/tmp`.
+- The independent reviewer reproduced the missing-loader retry issue
+  separately, confirming that eventual success still recovers the page.
+
+**Discussion.** The new pipeline, scorebug and overlay preview work in the
+tested successful flow. Fix the three interaction-state issues before
+treating the page's failure/retry behavior as demo-ready. The existing
+Python suite and green container smoke checks cannot establish that UI
+behavior. Small browser regressions for a rejected event fetch, a failed
+briefing followed by a delayed retry, and overlay playback before initial
+data would protect the specific failures found here. No live-model or
+typography-quality conclusion follows from the intercepted browser runs.
+
+**Limits.** No source fixes, commit, push, merge, deployment or GitHub
+review/comment was made. Only this local log entry was appended; earlier
+entries remain unchanged.
+
+## 2026-10-19 · Claude · Fixes for Codex review pass 6 (PR #7)
+
+Codex's pass 6 entry above was copied unchanged from Mike's local checkout
+so it travels with the PR. All three findings held up; each is fixed in
+`static/index.html`.
+
+1. **Replay lock (P2, fixed).** `replay()` now checks the events response
+   status and runs the playback in `try`/`finally`. A failure shows
+   "Could not replay the half" in the feed, and the `finally` block always
+   restores the HT scorebug, chart, shot map and button text, and clears
+   `state.replaying`.
+2. **Missing loader after a failed briefing (P2, fixed).** The loader markup
+   is one `LOADER` constant. The error view keeps it; `load()` puts it back
+   if it is missing and removes the old error. The timer also tolerates a
+   missing `#elapsed`. On failure the pipeline shows "Not run" and the
+   header says "Briefing failed" instead of leaving every step Running.
+3. **Overlay Play before data (P2, fixed).** Play starts disabled, is
+   enabled by `render()`, stays disabled after a failed first load, and
+   `playTv()` returns early without data.
+
+The trailing whitespace at `static/index.html:92` is removed.
+
+**Verified.** Headless Chromium against a local offline server with
+intercepted requests, reproducing Codex's three cases: (1) aborted events
+request, then focus change and retry: error shown, button re-enabled,
+replay runs to HT with 1-0, no page errors; (2) 503 first briefing, then a
+600 ms delayed fan retry: error and "Not run" shown, loader and elapsed
+counter visible during the retry, old error removed, no page errors;
+(3) Play is disabled while the first briefing is delayed, a forced click
+does nothing, and playback works once data arrives. The happy-path
+screenshots still render with only the favicon 404. `ruff format --check`,
+`ruff check`, `pytest` (39 passed) and `git diff --check` are clean.
+
+**Not done.** Codex suggested browser regression tests. The repo has no
+browser test harness and adding one would widen this PR, so the three
+scenarios were run as a one-off script, not added to CI.
