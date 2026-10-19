@@ -549,6 +549,16 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
                     **_own_half_losses(facts, victim),
                 },
                 {
+                    "label": f"{names[victim]} passes made under pressure",
+                    "before": b[victim]["passes_under_pressure"],
+                    "after": a[victim]["passes_under_pressure"],
+                },
+                {
+                    "label": f"{names[victim]} pass accuracy under pressure",
+                    "before": b[victim]["pass_accuracy_under_pressure"],
+                    "after": a[victim]["pass_accuracy_under_pressure"],
+                },
+                {
                     "label": f"{names[victim]} possession %",
                     "before": b[victim]["possession_pct"],
                     "after": a[victim]["possession_pct"],
@@ -1278,6 +1288,11 @@ async def half_time_briefing(
         check_findings,
         use_tools=True,
     )
+    # Moments to watch are picked in code for whichever findings came back,
+    # so the clip list never depends on the model.
+    for f in findings:
+        f["moments"] = metrics.moments_for_finding(f, facts["key_moments"])
+
     explanations = await model_or_rules(
         "explainer",
         EXPLAINER_INSTRUCTIONS,

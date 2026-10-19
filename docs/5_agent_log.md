@@ -868,3 +868,31 @@ files). Seed 27 storyline unchanged: no generator or metrics change.
 **Open.** Not yet tested against the live model; the new fields are plain
 text so the fallback path is the risk if gpt-4.1-mini omits one. The 60'
 verify step (does the chosen option work?) is the next change.
+
+## 2026-10-19 · Claude · Clips per finding and press resistance (follow-up to PR #8)
+
+**Why.** Club analysts hand the coach two or three timestamped clips per
+message, and Opta Forum 2026 was dominated by press resistance. Both
+are cheap from the events we already have.
+
+**Changed.** `halftime/metrics.py`: `press_resistance(passes)` returns
+`passes_under_pressure` and `pass_accuracy_under_pressure`; `team_summary`
+includes both, so the turning point carries them before and after.
+`moments_for_finding` picks up to three key moments for a finding (press:
+after the switch; threat: the dominant side's after the switch; scoreline:
+goals and big chances), topped up from the rest so no finding is empty.
+`halftime/agents.py`: the press finding's evidence adds the victim's
+pressured-pass count and accuracy before and after; the pipeline attaches
+`moments` to every finding in code after the tactics step, model or not.
+`static/index.html`: a "Clips" row under each change (clock, player,
+receiver, kind, team colour).
+
+**Verified.** Ruff format and check clean; `pytest` 40 passed (new test
+checks pressured-pass counts against the raw events and the empty case;
+the offline analyst test checks each finding has one to three moments in
+clock order and the press clips are after the switch). Offline screenshot
+of seed 27 analyst mode shows the new chips and clip rows. Storyline
+unchanged: seed 27 still turns at 25' with the away press.
+
+**Open.** Clips are listed, not linked to the replay; the overlay cards do
+not yet show them.

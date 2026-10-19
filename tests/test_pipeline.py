@@ -82,6 +82,13 @@ def test_analyst_briefing_offline(match, focus):
     for c in out["changes"]:
         assert c["action"] != c["alternative"]
         assert c["tradeoff"] and c["alternative_tradeoff"]
+    for f in out["findings"]:
+        assert 1 <= len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
+        assert f["moments"] == sorted(
+            f["moments"], key=lambda m: (m["minute"], m["second"])
+        )
+    press = out["findings"][0]
+    assert all(m["minute"] >= press["minute"] for m in press["moments"])
     assert [t["agent"] for t in out["trace"]] == [
         "stats",
         "tactics",
@@ -89,6 +96,25 @@ def test_analyst_briefing_offline(match, focus):
         "coach",
         "overlay",
     ]
+
+
+def test_press_resistance_counts_pressured_passes(match):
+    ev = metrics.window(match["events"])
+    for side in metrics.SIDES:
+        s = metrics.team_summary(ev, side)
+        pressured = [
+            e
+            for e in ev
+            if e["type"] == "pass"
+            and e["team"] == side
+            and e.get("under_pressure")
+        ]
+        assert s["passes_under_pressure"] == len(pressured)
+        assert 0 <= s["pass_accuracy_under_pressure"] <= 1
+    assert metrics.press_resistance([]) == {
+        "passes_under_pressure": 0,
+        "pass_accuracy_under_pressure": None,
+    }
 
 
 def test_fan_briefing_spotlights_player(match):

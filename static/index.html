@@ -165,6 +165,8 @@
   .option .cost { color: var(--text-secondary); }
   .option .cost b { font-weight: 700; margin-right: 4px; }
   @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  .moments { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .moments > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; font-family: var(--font-display); }
   .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
   .watch b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; margin-right: 4px; }
   .fan h3 { font-size: 32px; font-weight: 800; margin: 0 0 10px; line-height: 1.25; }
@@ -536,6 +538,13 @@ function evidenceChips(f) {
   }).join("");
 }
 
+const KINDS = { goal: "goal", big_chance_missed: "big chance", threat_pass: "threat pass" };
+function momentChips(f) {
+  if (!f.moments || !f.moments.length) return "";
+  const clock = (m) => `${m.minute}:${String(m.second).padStart(2, "0")}`;
+  return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
+}
+
 const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
@@ -552,7 +561,8 @@ function renderOutput(d) {
           <div class="option rec"><b>Option A</b><span class="pick">recommended</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
           <div class="option"><b>Option B</b><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
         </div>
-        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div></div></div>`;
+        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
+        ${momentChips(f)}</div></div>`;
     }).join("") + "</div>";
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
