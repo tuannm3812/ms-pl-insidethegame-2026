@@ -238,7 +238,9 @@
   #tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
          border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none;
          box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 10; max-width: 240px; }
-  .teamgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  /* Two tables side by side only when the card itself has room, not the viewport. */
+  .teamgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+  .teamgrid > * { min-width: 0; overflow-x: auto; }
   .teamgrid h3 { font-size: 15px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
   table.report { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
   table.report td, table.report th { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; }
@@ -249,7 +251,6 @@
   table.report td:last-child { white-space: nowrap; }
   table.report .unit { color: var(--text-secondary); font-size: 11px; }
   .teamnote { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
-  @media (max-width: 760px) { .teamgrid { grid-template-columns: 1fr; } }
   .pre-outlook { font-size: 14px; margin: 0 0 4px; }
   .pre-scout { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
   .prerow { display: grid; grid-template-columns: minmax(120px, 1.1fr) 2fr minmax(90px, auto); gap: 10px; align-items: center;
@@ -384,7 +385,7 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, card: null };
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tip = $("tip");
@@ -455,8 +456,16 @@ function setBusy(busy) {
   $("out").classList.toggle("loading", busy);
 }
 
+// A check belongs to one briefing and one set of choices; bumping checkReq
+// drops any check result still in flight for the old ones.
+function clearCheck() {
+  state.check = null; state.checkReq++;
+  $("out").querySelectorAll(".checkslot").forEach((slot) => (slot.innerHTML = ""));
+}
+
 async function load() {
   const token = ++state.req;
+  state.choices = {}; clearCheck();
   setBusy(true);
   drawPipeline(null);
   $("pipeTotal").textContent = "";
@@ -749,6 +758,7 @@ const choice = (finding) => state.choices[finding] || "a";
 async function runCheck() {
   const d = state.data, btn = $("check60");
   if (!d || d.mode !== "analyst") return;
+  const token = ++state.checkReq;
   btn.disabled = true; btn.textContent = "Checking…";
   try {
     const res = await fetch("api/check", {
@@ -756,9 +766,12 @@ async function runCheck() {
       body: JSON.stringify({ focus: d.focus, choices: { press: choice("press"), threat: choice("threat"), scoreline: choice("scoreline") }, findings: d.findings, changes: d.changes }),
     });
     if (!res.ok) throw new Error("check request failed (" + res.status + ")");
-    state.check = await res.json();
-    renderCheck(state.check);
+    const check = await res.json();
+    if (token !== state.checkReq || d !== state.data) return;
+    state.check = check;
+    renderCheck(check);
   } catch (err) {
+    if (token !== state.checkReq || d !== state.data) return;
     $("out").querySelector(".checkbar .muted").textContent = "Could not run the check: " + err.message + ". Try again.";
   } finally {
     btn.disabled = false; btn.textContent = "⏱ Check at 60'";
@@ -806,13 +819,13 @@ function renderOutput(d) {
         const box = el.parentElement;
         state.choices[box.dataset.finding] = el.dataset.option;
         box.querySelectorAll(".option").forEach((o) => o.classList.toggle("chosen", o === el));
-        state.check = null; $("out").querySelectorAll(".checkslot").forEach((slot) => (slot.innerHTML = ""));
+        clearCheck();
       };
       el.addEventListener("click", pick);
       el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
     });
     $("check60").addEventListener("click", runCheck);
-    if (state.check) renderCheck(state.check);
+    if (state.check && state.check.focus === d.focus) renderCheck(state.check);
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
     $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>

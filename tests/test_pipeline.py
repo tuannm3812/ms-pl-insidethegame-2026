@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from halftime import metrics
 from halftime.agents import (
     check_changes,
+    check_findings,
     check_grounded,
     check_verdicts,
     coach_offline,
@@ -19,6 +20,7 @@ from halftime.agents import (
     parse_json_reply,
     second_half_check,
     tactics_offline,
+    watch_targets,
 )
 from halftime.generator import generate_match, shot_xg
 from halftime.xt import grid
@@ -85,7 +87,7 @@ def test_analyst_briefing_offline(match, focus):
         assert c["action"] != c["alternative"]
         assert c["tradeoff"] and c["alternative_tradeoff"]
     for f in out["findings"]:
-        assert 1 <= len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
+        assert len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
         assert f["moments"] == sorted(
             f["moments"], key=lambda m: (m["minute"], m["second"])
         )
@@ -652,3 +654,119 @@ def test_coach_reply_rejection_names_the_bad_field():
     target = [dict(c, watch={"metric": "xg", "below": 1}) for c in good]
     with pytest.raises(ValueError, match="watch must be"):
         check_changes(target)
+
+
+def test_model_watch_is_replaced_by_the_checked_target(match):
+    findings, explanations, changes = _rules(match)
+    canonical = [c["watch"] for c in changes]
+    # A grounded but different target: the after-press rate, not the before.
+    lost = findings[0]["evidence"][1]["after"]
+    changes[0]["watch"] = f"Own-half losses below {lost} per minute."
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    coach = next(t for t in out["trace"] if t["agent"] == "coach")
+    assert coach["backend"] == "ScriptedClient"
+    assert "watch lines set from code" in coach["note"]
+    assert [c["watch"] for c in out["changes"]] == canonical
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    for c, change in zip(check["checks"], out["changes"], strict=True):
+        if c["finding"] != "scoreline":
+            assert str(c["target"]) in change["watch"]
+
+
+@pytest.mark.parametrize("focus", ["home", "away"])
+def test_watch_targets_match_coach_and_check(match, focus):
+    facts = metrics.half_time_facts(match)
+    findings = tactics_offline(facts, match, focus)
+    watch = watch_targets(facts, findings, focus)
+    changes = coach_offline(findings, facts, match, focus)
+    assert {c["finding"]: c["watch"] for c in changes} == {
+        f: w["text"] for f, w in watch.items()
+    }
+    check = asyncio.run(
+        second_half_check(
+            match, findings=findings, changes=changes, focus=focus
+        )
+    )
+    for c in check["checks"]:
+        assert c["direction"] == watch[c["finding"]]["direction"]
+        assert (
+            str(watch[c["finding"]]["target"]) in watch[c["finding"]]["text"]
+        )
+        if c["finding"] != "scoreline":
+            assert c["target"] == watch[c["finding"]]["target"]
+
+
+@pytest.mark.parametrize(
+    "bad_id", [None, ["press"], {"id": "press"}, 7, "missing"]
+)
+def test_malformed_finding_ids_are_rejected(match, bad_id, monkeypatch):
+    import app as app_module
+
+    findings, _, changes = _rules(match)
+    if bad_id == "missing":
+        del findings[0]["id"]
+    else:
+        findings[0]["id"] = bad_id
+    with pytest.raises(ValueError, match="ids"):
+        check_findings(findings)
+    monkeypatch.setattr(app_module, "client", None)
+    r = TestClient(app_module.app).post(
+        "/api/check", json={"findings": findings, "changes": changes}
+    )
+    assert r.status_code == 422
+
+
+def test_identical_options_are_rejected(match):
+    findings, explanations, changes = _rules(match)
+    copies = [
+        dict(c, alternative=c["action"] + " ", alternative_tradeoff="Same.")
+        for c in changes
+    ]
+    with pytest.raises(ValueError, match="repeats the recommended"):
+        check_changes(copies)
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(copies)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "offline-rules"
+    assert all(c["alternative"] != c["action"] for c in out["changes"])
+
+
+def test_unmeasured_window_is_accepted_as_null(match):
+    findings, explanations, changes = _rules(match)
+    accuracy = findings[0]["evidence"][3]
+    assert "accuracy under pressure" in accuracy["label"]
+    accuracy["before"] = None
+    assert check_findings(findings) == findings
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    accuracy["after"] = None
+    with pytest.raises(ValueError, match="evidence"):
+        check_findings(findings)
+
+
+@pytest.mark.parametrize("seed", [2, 5, 27, 41])
+def test_clips_belong_to_their_finding(seed):
+    m = generate_match(seed)
+    for focus in ("home", "away"):
+        facts = metrics.half_time_facts(m)
+        for f in tactics_offline(facts, m, focus):
+            moments = metrics.moments_for_finding(f, facts["key_moments"])
+            assert len(moments) <= metrics.MOMENTS_PER_FINDING
+            for c in moments:
+                if f["id"] in ("press", "threat"):
+                    assert c["minute"] >= f["minute"]
+                if f["id"] == "threat":
+                    assert c["team"] == f["team"]
+                if f["id"] == "scoreline":
+                    assert c["kind"] in ("goal", "big_chance_missed")

@@ -499,8 +499,8 @@ def moments_for_finding(finding: dict, key_moments: list[dict]) -> list[dict]:
 
     A press finding takes moments after the switch; a threat finding takes
     the dominant side's moments after it; the scoreline finding takes goals
-    and big chances. Short lists are topped up with the earliest moments so
-    every finding has something to watch.
+    and big chances. A list may be short or empty: a moment from another
+    team or time would show the analyst evidence for a different story.
     """
     t = finding.get("minute", 0)
     team = finding.get("team")
@@ -516,11 +516,6 @@ def moments_for_finding(finding: dict, key_moments: list[dict]) -> list[dict]:
             for m in key_moments
             if m["kind"] in ("goal", "big_chance_missed")
         ]
-    for m in key_moments:
-        if len(picked) >= MOMENTS_PER_FINDING:
-            break
-        if m not in picked:
-            picked.append(m)
     picked.sort(key=lambda m: (m["minute"], m["second"]))
     return [
         {k: m[k] for k in ("minute", "second", "kind", "team", "player")}

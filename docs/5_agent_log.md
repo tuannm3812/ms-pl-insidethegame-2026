@@ -980,3 +980,303 @@ so a player's left-right spread is noise (a RW can show more on the left);
 insights name the third only and the card says so. Fixing it means a
 generator change that alters seed 27's events. The new numbers are not
 yet passed to the model agents. Not run against the live model.
+
+## 2026-10-19 · Codex · PR #8 review, pass 7
+
+**Scope.** Reviewed [PR #8](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/8),
+`feat(agents): coach options with trade-offs, clips per finding, press resistance`,
+from `4e9e4824c95cd6a80a9b197aa3cb5c0625e9e5ae` to
+`8d0febe08cd99529598bfe9ea1383f70d691b303`, against `AGENTS.md` and the
+project standard. GitHub already marked it merged when this review began.
+Tested an archived snapshot; the main checkout stayed at `4e9e482`.
+An independent reviewer checked the new agent contracts and pressure
+evidence. File/line references below refer to the PR head.
+
+**Findings.** Three verified P2 gaps warrant follow-up fixes.
+
+1. **P2 — Clip top-ups discard the finding's team/time restrictions.**
+   `halftime/metrics.py:368-373` fills a short filtered list from arbitrary
+   key moments. On seed 27 the threat finding describes away attacks since
+   minute 25, but its clips include Ferreira at 16:30 and home player
+   Navarro at 23:56, alongside Quinn at 30:45. The actual browser renders
+   these under that finding. On seed 2, a press finding at minute 25 includes
+   home passes at 9:33 and 9:39. The timestamps are real; their association
+   with the stated finding is misleading. The top-up is documented as
+   deliberate, but the UI does not distinguish those general highlights
+   from relevant evidence. Keep eligible moments even if fewer than three
+   exist, select additional eligible events from the full event stream, or
+   explicitly separate contextual highlights. Add team/time invariants for
+   threat clips and multi-seed coverage for press clips; the current seed
+   27 press-only assertion misses both examples.
+
+2. **P2 — Unavailable pressure accuracy makes correct model evidence fail.**
+   `halftime/agents.py:556-559` adds pressure accuracy to before/after
+   evidence, but `press_resistance` intentionally returns `None` when a
+   window has no pressured passes (`halftime/metrics.py:71-72`). The existing
+   evidence validator accepts only numeric before/after values. Reproduced
+   with the supported custom-team generator: use `default_teams()`, set
+   `away.style.press = 0.0`, and generate seed 27 with those teams, retaining
+   the away press change at 25. The supplied accuracy evidence is
+   `None -> 0.72`. A scripted model echoing that canonical output is rejected
+   with `press: evidence must list labelled values`, while the offline
+   fallback returns the same evidence unchecked. This does not occur in the
+   tested default seed-27 match. Omit unavailable measurements or allow
+   explicit nullable before/after values consistently, with the page's
+   existing `n/a` handling. Test a zero-denominator window through both
+   model and offline paths.
+
+3. **P2 — Identical options still count as an accepted A/B choice.**
+   `halftime/agents.py:364-368` requires nonempty text but never checks that
+   the alternative differs from the recommendation. With otherwise
+   canonical seed-27 replies, setting `alternative = action` and
+   `alternative_tradeoff = tradeoff` on every change is accepted with a
+   successful `ScriptedClient` coach trace. The response contains the same
+   option twice for all three findings. This defeats the PR's two-choice
+   contract; the new inequality assertion only covers the rule-based path.
+   Reject exact duplicate option text inside the model fallback boundary
+   and add a scripted duplicate-options regression. This recommendation
+   concerns detectable exact duplicates, not a claim that simple validation
+   can prove semantic differences between arbitrary prose options.
+
+**Verification.**
+
+- Exact PR snapshot: **40 tests passed in 2.31 s**, Python 3.15.0. Ruff
+  **0.16.8** reported **13 files already formatted** and **All checks
+  passed**. `git diff --check` for the PR range passed. README's run example
+  still says 39 tests at `README.md:40`; that is a minor stale count rather
+  than one of the functional findings above.
+- GitHub's `test` and `docker` jobs both reported success. Rechecked the
+  PR after verification: merged, same reviewed head SHA. No local Docker
+  build or Python 3.12 test run was performed.
+- Independently matched the seed-27 pressure counts and completion shares
+  against raw first-half events: home 117 pressured passes, accuracy 0.718;
+  away 45, accuracy 0.711. The nonempty default-match computation is correct.
+- Reproduced clip mismatches through full offline briefings for seeds 27
+  and 2, the nullable-pressure rejection through a real Agent Framework
+  scripted client, and duplicate-option acceptance through that same client.
+  No live model was contacted. The independent reviewer separately verified
+  the nullable-pressure contract mismatch.
+- Headless Chromium with intercepted, code-generated offline responses:
+  three analyst calls, six option cards, three clip rows, and no page
+  errors. The desktop option grids have two columns; at 390 px they have
+  one column and no horizontal overflow. Fan mode renders without errors.
+  External resources, including Google Fonts, were blocked; this checks
+  fallback-font layout rather than downloaded typography. Browser output
+  confirmed the seed-27 unrelated clips are actually visible.
+
+**Discussion.** Keep the two-option presentation and the code-computed
+pressure metrics, while correcting the evidence association and model
+contract gaps. The tests establish the default happy path, but not sparse
+windows, clip relevance across seeds or duplicated model choices. Since the
+PR is merged, address these in a follow-up rather than treating CI success
+as closure of the findings. Live coach acceptance for the expanded option
+schema remains unverified: the earlier successful live check used the
+previous schema and does not establish acceptance of the new required fields.
+
+**Limits.** No source fix, commit, push, merge, deployment or GitHub
+review/comment was performed. Only this local log entry was appended;
+earlier entries remain unchanged.
+
+## 2026-10-19 · Codex · Review of Claude's PR #9, pass 8
+
+**Scope.** Reviewed [PR #9](https://github.com/tuannm3812/ms-pl-insidethegame-2026/pull/9),
+`feat: 60' verifier, pre-match vs now, team report and player cards`, from
+base `4de26a92ce93f2126caccc6f36940704433e4a31` to
+head `038424722236007515e28cc46a842b8752f11123`, against `AGENTS.md` and
+the project standard. Tested an archived snapshot under `/private/tmp`.
+Two independent reviewers checked verifier/API behavior and browser state
+and layout; this review also reproduced their reported failures. The local
+checkout stayed at `4e9e482`, preserving the existing uncommitted pass 7 log.
+All file/line references below refer to the PR head.
+
+**Findings.** Five new verified P2 issues.
+
+1. **P2 — Verification can substitute a different Watch target.**
+   `halftime/agents.py:1221-1230` selects the canonical loss threshold from
+   first-half facts; `check_targets` never reads the accepted coach change
+   or its Watch target. Reproduced through the real scripted model path on
+   seed 27: the coach Watch is `Own-half losses below 1.48 per minute.`
+   That value is supplied in `coach_targets`, and the response passes shape
+   and number checks with a successful coach trace. At 60', the measured
+   value is 1.33, which meets that advertised target. The verifier instead
+   substitutes 0.84, marks it not on track and recommends changing options.
+   Persist a typed metric/direction/threshold with each call and verify that
+   exact target, or render a strictly canonical Watch from code and constrain
+   the coach to it. A matching finding ID is insufficient to identify which
+   of several supplied targets the coach actually selected.
+
+2. **P2 — A completed check survives a change of focus team.**
+   `static/index.html:815` renders the global cached `state.check` whenever
+   analyst output is rebuilt; briefing loads never clear or scope it.
+   In Chromium, checking Home then selecting Away renders the Home checks
+   unchanged under Away calls. Seed 27's Away scoreline should check
+   Riverside xG 0.03 against under 0.13, On track; the screen retains
+   Northgate xG 0.27 against under 0.1, Not yet. Invalidate cached results
+   when the briefing context changes, or key them to the exact briefing and
+   focus before rendering them.
+
+3. **P2 — An in-flight check can restore a verdict for an old option.**
+   `static/index.html:759-760` unconditionally stores and renders a response.
+   While checking A, the option cards remain interactive. Selecting B clears
+   the check slots at `static/index.html:809`, but a delayed A response then
+   fills them again. Verified in Chromium: B is visibly chosen while the
+   returned verdict for posted choice A says to consider B. Bind requests
+   and responses to the briefing and a choice revision, dropping stale
+   results, or disable option changes while checking. This needs an async
+   guard in addition to the cache invalidation in finding 2.
+
+4. **P2 — Malformed finding IDs escape as HTTP 500.**
+   The new route calls `check_findings` at `app.py:112`, but only converts
+   `ValueError` to a validation response at `app.py:123-124`. In that
+   validator, sorting a mixture of string IDs and a missing/null/list/dict
+   ID raises `TypeError` before a rejection can be recorded. Independently
+   posted an otherwise canonical briefing with its first finding ID missing
+   or null to the offline API: both returned 500 Internal Server Error.
+   The independent reviewer also reproduced list/dict IDs. Validate ID types
+   and required fields before sorting, preferably in typed request models,
+   so invalid client payloads return 422 rather than an internal error.
+   The validator predates this PR, but the new public POST route exposes
+   this failure to client input.
+
+5. **P2 — The team report overflows at intermediate viewport widths.**
+   `static/index.html:241` keeps two min-content report columns, while the
+   single-column breakpoint at `static/index.html:252` only considers a
+   760 px viewport. Above the outer page grid's 860 px breakpoint, the right
+   stack is much narrower than the viewport. With the supported system-font
+   fallback, Chromium at 900 px produces 565 px-wide cards in a roughly
+   456 px track and a 996 px document. At 1024 px the document is 1053 px;
+   at 861 px it is 978 px. The same fixtures on the base page do not
+   overflow. The independent reviewer removed only the team card and
+   restored the normal 900 px width. Collapse based on available card width
+   or adjust the tracks/table wrapping so the right stack can shrink. A
+   390 px check misses this two-column-page regression.
+
+**Earlier findings.** The three pass 7 issues from PR #8 remain open:
+unrelated clip top-ups, nullable pressure evidence rejected by model
+validation, and identical A/B options accepted. PR #9's base contains the
+same implementations. They are inherited issues, not counted again among
+the five new findings above.
+
+**Verification.**
+
+- Exact snapshot: **46 tests passed in 2.02 s**, Python 3.15.0. Ruff
+  **0.16.8** reported **14 files already formatted** and **All checks
+  passed**. `git diff --check` for the PR range passed.
+- Rechecked GitHub after the probes: PR #9 remained open at the reviewed
+  head; both `test` and `docker` jobs reported success. These are remote CI
+  results; no local container build or Python 3.12 run was performed.
+- Independently reproduced target substitution using `ScriptedClient`
+  through the real Agent Framework, and malformed-ID responses using
+  FastAPI `TestClient` with the app client set to `None`.
+- Re-ran the independent reviewer's actual Chromium reproductions with
+  all routes intercepted and code-generated offline fixtures: stale focus
+  checks, an A response arriving after B was selected, and base/head layout
+  comparisons at 1024, 980, 900, 861, 390 and 375 px. The stale-result
+  scenarios produce no page errors, despite displaying incorrect context.
+  External resources, including Google Fonts, were blocked.
+- The verifier reviewer additionally exercised both focus teams at every
+  check minute from 46 to 90, A/B bookkeeping, independent score/window
+  counts and five malformed verifier reply shapes; those checks passed.
+  The extracted `_model_or_rules` path showed no behavioral regression.
+- Inspected pre-match simulations, team split rates and player heatmap
+  aggregation. The default seed-27 pre-match press row reports 106 against
+  mean 46.32 and range 36-60, consistent with Claude's recorded example.
+  No additional actionable issue was established in those calculations.
+
+**Discussion.** Resolve the target and result-context problems before
+presenting the new verifier as a reliable check of the coach's selected
+call. Keep the disclaimer that the synthetic second half is fixed: the
+check cannot establish what an option caused. Add regressions for the
+accepted model Watch versus measured target, team changes after a check,
+option changes during a delayed check, malformed request IDs, and tablet
+widths. The current happy-path suite and green CI do not cover these
+failures. Live acceptance of the expanded coach/verifier schema remains
+unverified; earlier live evidence used the older coach schema.
+
+**Limits.** No source fixes, live model calls, deployment, merge, GitHub
+review/comment, commit or push were performed. This pass only appended to
+the local log; the existing pass 7 entry and all earlier entries remain
+unchanged.
+
+## 2026-10-19 · Codex · Follow-up status after pass 8
+
+**Checked.** Queried the latest GitHub pull requests and PR #9's current
+head, state, update time and CI results. Also inspected local status, all
+available Git refs and the worktree list. PR #9 remains open at
+`038424722236007515e28cc46a842b8752f11123`, unchanged from pass 8. The local
+checkout remains `main` at `4e9e482`, with only the existing pass 7 and
+pass 8 log additions uncommitted; no new application or test changes are
+available locally. No additional linked worktree was listed.
+
+**Discussion.** There is no new implementation to review or evidence that
+the reported fixes have landed. The five pass 8 findings remain open:
+verifying a different Watch threshold, cached results surviving a team
+change, stale responses after an option change, malformed IDs returning
+500, and tablet-width report overflow. The three inherited pass 7 findings
+also remain open. This is a status check, not a new set of findings or a
+repeat of their reproductions.
+
+**Verification limits.** GitHub still reports successful `test` and `docker`
+jobs for that same head. The earlier 46-test and Ruff results belong to
+pass 8; they were not rerun because the reviewed code is unchanged. No
+live model calls, source edits, deployment, GitHub comments, commit or push
+were performed. This note is appended without changing earlier entries.
+
+## 2026-10-19 · Claude · Fixes for Codex passes 7 and 8 (PR #9)
+
+**Context.** Codex's pass 7 (PR #8) and pass 8 (PR #9) entries above were
+uncommitted in Mike's main checkout; copied here verbatim so the PR carries
+them. All eight findings were checked and all held up; each is fixed.
+
+**Changed.**
+- Pass 8 #1, Watch target: new `watch_targets(facts, findings, focus)` in
+  `halftime/agents.py` is the one place each finding's target is worded and
+  valued (label, target, direction, text). `coach_offline` takes its Watch
+  lines from it; the model coach receives them as `watch` and is told to
+  copy them, and after the reply passes its checks every Watch line is set
+  to the code's text (trace note "watch lines set from code" when the model
+  wrote something else). `check_targets` reads the same targets, so the
+  60' check measures exactly the line shown. The verifier input also uses
+  the code's text, not the client's.
+- Pass 8 #2 and #3, stale checks (`static/index.html`): `clearCheck`
+  empties the result and bumps `state.checkReq` on every briefing load and
+  every option change; `runCheck` drops a response whose token or briefing
+  is no longer current; a cached check renders only for its own focus.
+  Choices reset on a new briefing.
+- Pass 8 #4, 500 on bad ids: `check_findings` requires every finding to be
+  an object with a known id before sorting, so missing, null, number, list
+  and dict ids raise `ValueError`, which the route returns as 422.
+- Pass 8 #5, tablet overflow: the team report grid now uses
+  `repeat(auto-fit, minmax(min(100%, 340px), 1fr))`, so it goes to one
+  column by the card's width, not the viewport's; each table can scroll
+  inside its column as a last resort.
+- Pass 7 #1, clips: `moments_for_finding` no longer tops up short lists;
+  a finding shows only its own moments (possibly fewer than three, or none,
+  which the page already hides).
+- Pass 7 #2, nullable evidence: before/after evidence may hold None for a
+  window with nothing to measure, as long as one side is a number; the
+  page already shows None as n/a. Both None is still rejected.
+- Pass 7 #3, identical options: `check_changes` rejects an alternative
+  equal to the recommended action (ignoring case, spacing and end
+  punctuation); the coach prompt asks for a genuinely different option.
+- README test count updated (39 to 60).
+
+**Verified.** Ruff format and check clean; `pytest` 60 passed (14 new):
+a grounded model Watch of 1.48 is replaced by the code's 0.84 line and the
+check's target appears in the shown line; coach and check share targets
+for both focuses; five malformed ids each raise in `check_findings` and
+return 422 from `/api/check`; exact-duplicate options raise and a scripted
+duplicate reply falls back; a None accuracy is accepted through the
+scripted model path and both-None is rejected; clip team/time/kind
+invariants on seeds 2, 5, 27 and 41 for both focuses. Chromium against the
+offline app: after checking Home and switching to Away no stale checks
+show, and the Away check gives Riverside xG 0.03 against under 0.13, On
+track (Codex's expected value); with the check response delayed 1.5 s,
+picking B mid-check leaves no verdict on screen; document width equals the
+viewport at 1024, 980, 900, 861, 390 and 375 px.
+
+**Open.** The coach's own Watch wording is now discarded, so a live model
+cannot propose a different target; that is deliberate, since only code
+targets can be checked. Live acceptance of the coach and verifier schema
+is still unverified. The team report is one column at every desktop width
+the page currently reaches (the right column is under 700 px).

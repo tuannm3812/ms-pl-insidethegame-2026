@@ -259,6 +259,15 @@ def _is_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _same_text(a: str, b: str) -> bool:
+    """Two texts that differ only in case, spacing or end punctuation."""
+
+    def norm(t: str) -> str:
+        return " ".join(t.casefold().split()).rstrip(".!")
+
+    return norm(a) == norm(b)
+
+
 def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
@@ -266,7 +275,12 @@ def _is_number(value: Any) -> bool:
 def _evidence_value_ok(item: dict) -> bool:
     """Evidence is {before, after} numbers, or a value the page can show."""
     if "before" in item or "after" in item:
-        return _is_number(item.get("before")) and _is_number(item.get("after"))
+        # A window with nothing to measure (no pressured passes, say) is None
+        # in the facts; the page shows it as n/a.
+        pair = (item.get("before"), item.get("after"))
+        return any(_is_number(v) for v in pair) and all(
+            v is None or _is_number(v) for v in pair
+        )
     value = item.get("value")
     if isinstance(value, dict):
         return bool(value) and all(_is_number(v) for v in value.values())
@@ -277,8 +291,11 @@ def check_findings(findings: Any) -> list[dict]:
     """Reject tactics output the explainer, coach and page cannot use."""
     _require(isinstance(findings, list), "findings must be a list")
     _require(
-        sorted(f.get("id") for f in findings if isinstance(f, dict))
-        == sorted(FINDING_IDS),
+        all(
+            isinstance(f, dict) and f.get("id") in FINDING_IDS
+            for f in findings
+        )
+        and sorted(f["id"] for f in findings) == sorted(FINDING_IDS),
         f"findings need exactly the ids {FINDING_IDS}",
     )
     for f in findings:
@@ -367,6 +384,10 @@ def check_changes(changes: Any) -> list[dict]:
             all(_is_text(c.get(k)) for k in CHANGE_TEXT_FIELDS),
             "change action, tradeoff, alternative, alternative_tradeoff "
             "and watch must be non-empty text",
+        )
+        _require(
+            not _same_text(c["action"], c["alternative"]),
+            f"{c['finding']}: alternative repeats the recommended option",
         )
     _require(
         {c["finding"] for c in changes} == set(FINDING_IDS),
@@ -513,6 +534,81 @@ def coach_targets(facts: dict, focus: str) -> dict:
         },
         "momentum_window_minutes": MOMENTUM_WINDOW_MIN,
     }
+
+
+def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
+    """The one measurable target per finding, worded and valued in code.
+
+    The coach's Watch line and the 60' check both read from here, so the
+    target the analyst sees is exactly the target that gets checked.
+
+    Returns:
+        Finding id mapped to {label, target, direction, text}; direction is
+        "below" or "at_least".
+    """
+    names = facts["teams"]
+    opp = other(focus)
+    by_id = {f["id"]: f for f in findings}
+    targets = coach_targets(facts, focus)
+    watch = {}
+
+    if by_id["press"]["team"] == opp:
+        lost = _own_half_losses(facts, focus)
+        watch["press"] = {
+            "label": f"{names[focus]} balls lost in own half per min",
+            "target": lost["before"],
+            "direction": "below",
+            "text": (
+                f"Balls lost in our half back under {lost['before']} a "
+                f"minute (now {lost['after']})."
+            ),
+        }
+    else:
+        lost = _own_half_losses(facts, opp)
+        watch["press"] = {
+            "label": f"{names[opp]} balls lost in own half per min",
+            "target": lost["after"],
+            "direction": "at_least",
+            "text": (
+                f"Keep {names[opp]} losing the ball in their half at "
+                f"least {lost['after']} times a minute."
+            ),
+        }
+
+    threat = by_id["threat"]
+    if threat["team"] == opp:
+        limit = targets["opponent_threat_share_in_channel_pct_below"]
+        watch["threat"] = {
+            "label": (
+                f"{names[opp]} share of threat down the {threat['channel']} %"
+            ),
+            "target": limit,
+            "direction": "below",
+            "text": (
+                f"Their share of threat down the {threat['channel']} "
+                f"below {limit}%."
+            ),
+        }
+    else:
+        level = _per_10(facts["summary"][focus]["xt_created"], 45)
+        watch["threat"] = {
+            "label": f"{names[focus]} threat (xT) per 10 min",
+            "target": level,
+            "direction": "at_least",
+            "text": (
+                f"Our threat (xT) per 10 minutes stays at least {level}, "
+                "our first-half level."
+            ),
+        }
+
+    xg = targets["opponent_second_half_xg_below"]
+    watch["scoreline"] = {
+        "label": f"{names[opp]} xG since the break",
+        "target": xg,
+        "direction": "below",
+        "text": f"Their xG for the second half under {xg}.",
+    }
+    return watch
 
 
 def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
@@ -761,7 +857,6 @@ def coach_offline(
     findings: list[dict], facts: dict, match: dict, focus: str
 ) -> list[dict]:
     """Rule-based coach agent: three second-half changes."""
-    names = facts["teams"]
     opp = other(focus)
     squad = {p["position"]: p for p in match["teams"][focus]["players"]}
     fastest = max(
@@ -773,11 +868,9 @@ def coach_offline(
         key=lambda p: p["top_speed_kmh"],
     )
     by_id = {f["id"]: f for f in findings}
-    targets = coach_targets(facts, focus)
     changes = []
 
     press = by_id["press"]
-    lost = _own_half_losses(facts, other(press["team"]))
     if press["team"] == opp:
         changes.append(
             {
@@ -802,10 +895,6 @@ def coach_offline(
                     "Keeps the ball but one loose pass near our box is a "
                     "big chance for them."
                 ),
-                "watch": (
-                    f"Balls lost in our half back under {lost['before']} a "
-                    f"minute (now {lost['after']})."
-                ),
             }
         )
     else:
@@ -827,10 +916,6 @@ def coach_offline(
                 ),
                 "alternative_tradeoff": (
                     "Gives them more of the ball and time to build."
-                ),
-                "watch": (
-                    f"Keep {names[opp]} losing the ball in their half at "
-                    f"least {lost['after']} times a minute."
                 ),
             }
         )
@@ -865,11 +950,6 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Leaves the full-backs one-on-one if they switch play."
                 ),
-                "watch": (
-                    f"Their share of threat down the {threat['channel']} "
-                    "below "
-                    f"{targets['opponent_threat_share_in_channel_pct_below']}%."
-                ),
             }
         )
     else:
@@ -893,7 +973,6 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Longer switches are harder passes and some will be lost."
                 ),
-                "watch": "Our xT per minute stays at first-half levels.",
             }
         )
 
@@ -941,12 +1020,11 @@ def coach_offline(
             "tradeoff": tradeoff,
             "alternative": alternative,
             "alternative_tradeoff": alternative_tradeoff,
-            "watch": (
-                "Their xG for the second half under "
-                f"{targets['opponent_second_half_xg_below']}."
-            ),
         }
     )
+    watch = watch_targets(facts, findings, focus)
+    for c in changes:
+        c["watch"] = watch[c["finding"]]["text"]
     return changes
 
 
@@ -1164,11 +1242,11 @@ room. Return a JSON list of {finding, action, tradeoff, alternative,
 alternative_tradeoff, watch}, all strings. finding is the id of the finding
 the change answers ("press", "threat" or "scoreline"), not its title. action
 is the option you recommend and tradeoff its cost; alternative is the other
-option and alternative_tradeoff its cost. watch is one sentence naming a
-measurable target for the second half, taken from "targets", that tells the
-coach whether either option worked. Quote numbers only as they appear in the
-input; never calculate or invent one. A reply with any other number is
-discarded.
+option and alternative_tradeoff its cost. alternative must be a genuinely
+different option from action. watch is copied exactly from "watch" for that
+finding, because it is the target the second-half check measures. Quote
+numbers only as they appear in the input; never calculate or invent one. A
+reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
@@ -1202,96 +1280,53 @@ def check_targets(
     focus: str,
     until: int = CHECK_MINUTE,
 ) -> list[dict]:
-    """Measure each coach target on the second half so far, in code.
+    """Measure each Watch target on the second half so far, in code.
 
-    Mirrors the targets `coach_offline` asks the coach to watch, so a model
-    coach quoting the same targets is checked against the same numbers.
+    Targets come from `watch_targets`, the same place the coach's Watch line
+    is written from, so the check measures exactly what the analyst was shown.
     """
     ev = second_half_events(match["events"], until)
     minutes = until - 45
     opp = other(focus)
-    names = facts["teams"]
     by_id = {f["id"]: f for f in findings}
     summary = {s: metrics.team_summary(ev, s) for s in SIDES}
-    targets = coach_targets(facts, focus)
-    checks = []
+    watch = watch_targets(facts, findings, focus)
 
-    press = by_id["press"]
-    if press["team"] == opp:
-        lost = _own_half_losses(facts, focus)
-        value = _per_min(summary[focus]["turnovers_in_own_half"], minutes)
-        checks.append(
-            {
-                "finding": "press",
-                "label": f"{names[focus]} balls lost in own half per min",
-                "value": value,
-                "target": lost["before"],
-                "direction": "below",
-                "on_track": value < lost["before"],
-            }
-        )
-    else:
-        lost = _own_half_losses(facts, opp)
-        value = _per_min(summary[opp]["turnovers_in_own_half"], minutes)
-        checks.append(
-            {
-                "finding": "press",
-                "label": f"{names[opp]} balls lost in own half per min",
-                "value": value,
-                "target": lost["after"],
-                "direction": "at_least",
-                "on_track": value >= lost["after"],
-            }
-        )
-
+    side = focus if by_id["press"]["team"] == opp else opp
     threat = by_id["threat"]
-    if threat["team"] == opp:
-        share = metrics.threat_channels(ev, opp)[threat["channel"]]
-        limit = targets["opponent_threat_share_in_channel_pct_below"]
+    values = {
+        "press": _per_min(summary[side]["turnovers_in_own_half"], minutes),
+        "threat": (
+            metrics.threat_channels(ev, opp)[threat["channel"]]
+            if threat["team"] == opp
+            else _per_10(summary[focus]["xt_created"], minutes)
+        ),
+        "scoreline": summary[opp]["xg"],
+    }
+    checks = []
+    for fid in FINDING_IDS:
+        w = watch[fid]
+        label, target = w["label"], w["target"]
+        if fid == "scoreline":
+            # The xG target covers the whole half, so pace it to the minutes.
+            target = round(target * minutes / 45, 2)
+            label = f"{label} (target paced to {until}')"
+        value = values[fid]
         checks.append(
             {
-                "finding": "threat",
-                "label": (
-                    f"{names[opp]} share of threat down the "
-                    f"{threat['channel']} %"
-                ),
-                "value": share,
-                "target": limit,
-                "direction": "below",
-                "on_track": share < limit,
-            }
-        )
-    else:
-        value = _per_10(summary[focus]["xt_created"], minutes)
-        first_half = _per_10(facts["summary"][focus]["xt_created"], 45)
-        checks.append(
-            {
-                "finding": "threat",
-                "label": f"{names[focus]} threat (xT) per 10 min",
+                "finding": fid,
+                "label": label,
                 "value": value,
-                "target": first_half,
-                "direction": "at_least",
-                "on_track": value >= first_half,
+                "target": target,
+                "direction": w["direction"],
+                "on_track": (
+                    value < target
+                    if w["direction"] == "below"
+                    else value >= target
+                ),
+                "minutes": minutes,
             }
         )
-
-    # The xG target covers the whole half, so pace it to the minutes played.
-    pace = round(targets["opponent_second_half_xg_below"] * minutes / 45, 2)
-    xg = summary[opp]["xg"]
-    checks.append(
-        {
-            "finding": "scoreline",
-            "label": (
-                f"{names[opp]} xG since the break (target paced to {until}')"
-            ),
-            "value": xg,
-            "target": pace,
-            "direction": "below",
-            "on_track": xg < pace,
-        }
-    )
-    for c in checks:
-        c["minutes"] = minutes
     return checks
 
 
@@ -1410,7 +1445,10 @@ async def second_half_check(
             "focus_team": facts["teams"][focus],
             "minute": until,
             "chosen_options": chosen,
-            "watch": {f: by_id[f]["watch"] for f in FINDING_IDS},
+            "watch": {
+                f: w["text"]
+                for f, w in watch_targets(facts, findings, focus).items()
+            },
             "checks": checks,
         },
         lambda: verify_offline(checks, changes, choices),
@@ -1612,7 +1650,11 @@ async def half_time_briefing(
             }
             for p in match["teams"][focus]["players"]
         ]
-        result["changes"] = await model_or_rules(
+        watch = {
+            f: w["text"]
+            for f, w in watch_targets(facts, findings, focus).items()
+        }
+        changes = await model_or_rules(
             "coach",
             COACH_INSTRUCTIONS,
             {
@@ -1620,11 +1662,22 @@ async def half_time_briefing(
                 "findings": findings,
                 "explanations": explanations,
                 "squad": squad,
-                "targets": coach_targets(facts, focus),
+                "watch": watch,
+                "momentum_window_minutes": MOMENTUM_WINDOW_MIN,
             },
             lambda: coach_offline(findings, facts, match, focus),
             check_changes,
         )
+        # The 60' check measures the code's target, so the Watch line shown
+        # with each call is the code's wording, whatever the model wrote.
+        if any(c["watch"] != watch[c["finding"]] for c in changes):
+            coach = next(t for t in trace if t["agent"] == "coach")
+            coach["note"] = (
+                coach["note"] + "; " if coach["note"] else ""
+            ) + "watch lines set from code"
+        for c in changes:
+            c["watch"] = watch[c["finding"]]
+        result["changes"] = changes
     else:
         players = {p["name"]: p for p in facts["players"].values()}
         result["fan"] = await model_or_rules(
