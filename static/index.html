@@ -89,7 +89,7 @@
                  background: var(--surface-1); color: var(--text-primary); }
   .btn { cursor: pointer; }
   #replay { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-  
+
   .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
   .card h2 { font-size: 17px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-primary); margin: 0 0 10px; font-weight: 700;
             display: flex; align-items: center; gap: 8px; }
@@ -292,7 +292,7 @@
         </div>
         <div class="tv" id="tv" role="img" aria-label="Preview of the broadcast overlay cards"></div>
         <div class="tv-bar">
-          <button class="btn" id="tvPlay">▶ Play</button>
+          <button class="btn" id="tvPlay" disabled>▶ Play</button>
           <div class="tv-dots" id="tvDots"></div>
         </div>
       </section>
@@ -335,11 +335,11 @@ function kindOf(t) {
 }
 
 // Draw the five steps; the first `upto` show their trace, the rest wait.
-function drawPipeline(trace, upto = Infinity) {
+function drawPipeline(trace, upto = Infinity, idle = "Waiting") {
   const byAgent = Object.fromEntries((trace || []).map((t) => [t.agent, t]));
   $("pipeline").innerHTML = plan().map((a, i) => {
     const t = i < upto ? byAgent[a] : null;
-    let status = trace ? "Waiting" : "Running", cls = trace ? "" : "working";
+    let status = trace ? idle : "Running", cls = trace ? "" : "working";
     if (t) {
       const [k, label] = kindOf(t);
       cls = "k-" + k;
@@ -367,6 +367,8 @@ async function revealPipeline(trace, token) {
     (models ? ` · ${models} used the model` : " · no model calls");
 }
 
+const LOADER = `<div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>`;
+
 function setBusy(busy) {
   document.querySelectorAll(".controls button, .controls select").forEach((x) => {
     if (x.id !== "replay" || !state.replaying) x.disabled = busy;
@@ -379,9 +381,13 @@ async function load() {
   setBusy(true);
   drawPipeline(null);
   $("pipeTotal").textContent = "";
+  // A failed request replaces the output, so put the loader back if it is gone.
+  if (!$("elapsed")) $("out").insertAdjacentHTML("afterbegin", LOADER);
+  $("out").querySelector(".err")?.remove();
   const started = performance.now();
   const timer = setInterval(() => {
-    $("elapsed").textContent = ((performance.now() - started) / 1000).toFixed(1) + " s";
+    const clock = $("elapsed");
+    if (clock) clock.textContent = ((performance.now() - started) / 1000).toFixed(1) + " s";
   }, 100);
   try {
     state.meta = state.meta || await (await fetch("api/match")).json();
@@ -408,7 +414,10 @@ async function load() {
   } catch (err) {
     if (token !== state.req) return;
     setBusy(false);
-    $("out").innerHTML = `<div class="loader"></div><p class="err">Could not build the briefing: ${esc(err.message)}. Try again.</p>`;
+    $("out").innerHTML = LOADER + `<p class="err">Could not build the briefing: ${esc(err.message)}. Try again.</p>`;
+    drawPipeline([], 0, "Not run");
+    $("pipeTotal").textContent = "Briefing failed";
+    $("tvPlay").disabled = !state.data;
   } finally {
     clearInterval(timer);
   }
@@ -440,6 +449,7 @@ function render() {
   drawBars(d.summary);
   renderOutput(d);
   renderTv(d.overlays, 0);
+  $("tvPlay").disabled = false;
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
     d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
@@ -521,9 +531,8 @@ const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: 
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
-  const loader = `<div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>`;
   if (d.mode === "analyst") {
-    $("out").innerHTML = loader + `<h2>Three changes for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
+    $("out").innerHTML = LOADER + `<h2>Three changes for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
       const f = finds[c.finding] || {}, x = expl[c.finding] || {};
       const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
       return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(c.action)}</span></h3>
@@ -534,7 +543,7 @@ function renderOutput(d) {
     }).join("") + "</div>";
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
-    $("out").innerHTML = loader + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
+    $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
       <h3>${esc(fan.headline)}</h3>${fan.story.map((p) => `<p>${esc(p)}</p>`).join("")}
       ${fan.spotlight ? `<div class="spot"><div class="tag">Player spotlight</div><p>${esc(fan.spotlight.line)}</p></div>` : ""}
       <p class="watch"><b>Second half</b> ${esc(fan.watch_for)}</p>
@@ -573,6 +582,7 @@ function renderTv(cards, i) {
 }
 function stopTv() { clearTimeout(tv.timer); tv.timer = null; $("tvPlay").textContent = "▶ Play"; }
 function playTv() {
+  if (!state.data) return;
   const cards = state.data.overlays;
   if (tv.timer) return stopTv();
   $("tvPlay").textContent = "❚❚ Pause";
@@ -593,8 +603,24 @@ async function replay() {
   if (!d || state.replaying) return;
   state.replaying = true;
   const btn = $("replay"); btn.disabled = true;
-  const evs = await (await fetch("api/events?half=1")).json();
   $("liveCard").hidden = false; const feed = $("feed"); feed.innerHTML = "";
+  try {
+    const res = await fetch("api/events?half=1");
+    if (!res.ok) throw new Error("events request failed (" + res.status + ")");
+    await playEvents(d, await res.json(), btn, feed);
+  } catch (err) {
+    feed.innerHTML = `<div class="err">Could not replay the half: ${esc(err.message)}. Try again.</div>`;
+  } finally {
+    drawScorebug(d.score, "HT", false);
+    drawMomentum(d.timeline, d.turning_point_minute);
+    drawPitch(d.shots, d.teams);
+    btn.textContent = "▶ Replay first half live";
+    state.replaying = false;
+    btn.disabled = $("out").classList.contains("loading");
+  }
+}
+
+async function playEvents(d, evs, btn, feed) {
   const interesting = new Set(["shot", "goal", "sprint", "foul"]);
   const score = { home: 0, away: 0 };
   let i = 0;
@@ -615,14 +641,9 @@ async function replay() {
     drawScorebug(score, minute > 45 ? "HT" : shown + "'", minute <= 45);
     drawMomentum(d.timeline, d.turning_point_minute, Math.min(45, minute - (minute % 5)));
     drawPitch(d.shots, d.teams, minute);
-    btn.textContent = minute > 45 ? "▶ Replay first half live" : `● Live ${shown}'`;
+    if (minute <= 45) btn.textContent = `● Live ${shown}'`;
     await sleep(110);
   }
-  drawScorebug(d.score, "HT", false);
-  drawMomentum(d.timeline, d.turning_point_minute);
-  drawPitch(d.shots, d.teams);
-  state.replaying = false;
-  btn.disabled = $("out").classList.contains("loading");
 }
 
 document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
