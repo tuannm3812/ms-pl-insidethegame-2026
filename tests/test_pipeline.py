@@ -10,12 +10,14 @@ from halftime import metrics
 from halftime.agents import (
     check_changes,
     check_grounded,
+    check_verdicts,
     coach_offline,
     explain_offline,
     fan_offline,
     grounded_numbers,
     half_time_briefing,
     parse_json_reply,
+    second_half_check,
     tactics_offline,
 )
 from halftime.generator import generate_match, shot_xg
@@ -209,6 +211,88 @@ def test_broken_model_reply_falls_back_to_rules(match):
     assert "used rules" in out["trace"][1]["note"]
 
 
+@pytest.mark.parametrize("focus", ["home", "away"])
+def test_second_half_check_offline(match, focus):
+    briefing = asyncio.run(half_time_briefing(match, focus=focus))
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            focus=focus,
+            choices={"threat": "b"},
+        )
+    )
+    assert [c["finding"] for c in out["checks"]] == [
+        "press",
+        "threat",
+        "scoreline",
+    ]
+    for c in out["checks"]:
+        assert c["minutes"] == 15
+        expected = (
+            c["value"] < c["target"]
+            if c["direction"] == "below"
+            else c["value"] >= c["target"]
+        )
+        assert c["on_track"] is expected
+    assert out["choices"] == {"press": "a", "threat": "b", "scoreline": "a"}
+    by_id = {v["finding"]: v for v in out["verdicts"]}
+    for c in out["checks"]:
+        v = by_id[c["finding"]]
+        assert v["next"] == ("keep" if c["on_track"] else "change")
+        assert str(c["value"]) in v["verdict"]
+    threat = briefing["changes"][1]
+    assert (
+        threat["alternative"] in by_id["threat"]["verdict"]
+        or threat["action"] in by_id["threat"]["verdict"]
+    )
+    assert [t["agent"] for t in out["trace"]] == ["stats", "verifier"]
+    with pytest.raises(ValueError, match="a or b"):
+        asyncio.run(
+            second_half_check(
+                match,
+                findings=briefing["findings"],
+                changes=briefing["changes"],
+                choices={"press": "c"},
+            )
+        )
+
+
+def test_verifier_model_reply_is_checked_and_grounded(match):
+    briefing = asyncio.run(half_time_briefing(match))
+    good = [
+        {"finding": f, "verdict": "Keep going.", "next": "keep"}
+        for f in ("press", "threat", "scoreline")
+    ]
+    assert check_verdicts(good) == good
+    with pytest.raises(ValueError, match="keep or change"):
+        check_verdicts([dict(v, next="maybe") for v in good])
+    invented = [dict(v, verdict="We lost it 77 times.") for v in good]
+    client = ScriptedClient([json.dumps(invented)])
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "offline-rules"
+    assert "77" not in json.dumps(out["verdicts"])
+    client = ScriptedClient([json.dumps(good)])
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "ScriptedClient"
+    assert out["verdicts"] == good
+
+
 def test_api(monkeypatch):
     import app as app_module
 
@@ -226,6 +310,23 @@ def test_api(monkeypatch):
     )
     assert c.get("/").status_code == 200
     assert len(c.get("/api/events").json()) > 500
+    b = c.get("/api/briefing", params={"focus": "home"}).json()
+    r = c.post(
+        "/api/check",
+        json={
+            "focus": "home",
+            "choices": {"press": "b"},
+            "findings": b["findings"],
+            "changes": b["changes"],
+        },
+    )
+    assert r.status_code == 200 and r.json()["until"] == 60
+    assert r.json()["choices"]["press"] == "b"
+    bad = c.post(
+        "/api/check",
+        json={"findings": b["findings"], "changes": b["changes"][:2]},
+    )
+    assert bad.status_code == 422 and "three" in bad.json()["detail"]
 
 
 def test_key_based_foundry_client_from_env_file(tmp_path, monkeypatch):

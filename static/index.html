@@ -161,7 +161,23 @@
   .option.rec { border-color: var(--accent); }
   .option > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
   .option .pick { margin-left: 6px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+  .option { cursor: pointer; }
+  .option.chosen { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .option.chosen > b, .option.chosen .pick, .option.chosen p, .option.chosen .cost { color: var(--accent-text); }
+  .option .chosen-mark { display: none; margin-left: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .option.chosen .chosen-mark { display: inline; }
   .option p { margin: 4px 0 0; }
+  .checkbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 10px; }
+  .checkbar .muted { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  #check60 { background: var(--hi); color: var(--hi-text); border-color: var(--hi); font-weight: 600; }
+  .check { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; border-inline-start: 4px solid var(--border); }
+  .check.ok { border-inline-start-color: var(--hi); }
+  .check.no { border-inline-start-color: var(--away); }
+  .check b.badge { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em; font-size: 12px; margin-right: 6px; }
+  .check.ok b.badge { color: var(--hi); }
+  .check.no b.badge { color: var(--away); }
+  .check p { margin: 4px 0 0; color: var(--text-primary); }
+  .check .meta { color: var(--text-secondary); }
   .option .cost { color: var(--text-secondary); }
   .option .cost b { font-weight: 700; margin-right: 4px; }
   @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
@@ -316,7 +332,7 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false };
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tip = $("tip");
@@ -545,25 +561,75 @@ function momentChips(f) {
   return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
 }
 
+const choice = (finding) => state.choices[finding] || "a";
+
+async function runCheck() {
+  const d = state.data, btn = $("check60");
+  if (!d || d.mode !== "analyst") return;
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const res = await fetch("api/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ focus: d.focus, choices: { press: choice("press"), threat: choice("threat"), scoreline: choice("scoreline") }, findings: d.findings, changes: d.changes }),
+    });
+    if (!res.ok) throw new Error("check request failed (" + res.status + ")");
+    state.check = await res.json();
+    renderCheck(state.check);
+  } catch (err) {
+    $("out").querySelector(".checkbar .muted").textContent = "Could not run the check: " + err.message + ". Try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = "⏱ Check at 60'";
+  }
+}
+
+function renderCheck(k) {
+  const verdicts = Object.fromEntries(k.verdicts.map((v) => [v.finding, v]));
+  const agent = k.trace.find((t) => t.agent === "verifier") || {};
+  for (const c of k.checks) {
+    const slot = $("out").querySelector(`.checkslot[data-finding="${c.finding}"]`);
+    if (!slot) continue;
+    const v = verdicts[c.finding] || {};
+    const goal = c.direction === "below" ? "under" : "at least";
+    slot.innerHTML = `<div class="check ${c.on_track ? "ok" : "no"}"><b class="badge">${c.on_track ? "On track" : "Not yet"} · ${k.until}'</b><span class="meta">${esc(c.label)}: <b>${esc(c.value)}</b> (target ${goal} ${esc(c.target)}) · score ${k.score.home}–${k.score.away}</span>
+      <p>${esc(v.verdict || "")}</p>
+      <p class="meta">Verifier: ${esc(agent.backend || "")}${agent.ms ? " · " + agent.ms + " ms" : ""}. Synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
+  }
+}
+
 const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
   if (d.mode === "analyst") {
-    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
+    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2>
+      <div class="checkbar"><button class="btn" id="check60">⏱ Check at 60'</button><p class="muted">Pick an option under each call, then check whether its target is being met after 15 minutes of the second half.</p></div>
+      <div class="reveal">` + d.changes.map((c, i) => {
       const f = finds[c.finding] || {}, x = expl[c.finding] || {};
       const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
       return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(f.title || c.action)}</span></h3>
         <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}</div>
         <div class="body"><p>${esc(x.why_it_matters || "")}</p>
         <div class="chips">${evidenceChips(f)}</div>
-        <div class="options">
-          <div class="option rec"><b>Option A</b><span class="pick">recommended</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
-          <div class="option"><b>Option B</b><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
+        <div class="options" data-finding="${esc(c.finding)}">
+          <div class="option rec${choice(c.finding) === "a" ? " chosen" : ""}" data-option="a" role="button" tabindex="0"><b>Option A</b><span class="pick">recommended</span><span class="chosen-mark">✓ chosen</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
+          <div class="option${choice(c.finding) === "b" ? " chosen" : ""}" data-option="b" role="button" tabindex="0"><b>Option B</b><span class="chosen-mark">✓ chosen</span><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
         </div>
         <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
-        ${momentChips(f)}</div></div>`;
+        ${momentChips(f)}
+        <div class="checkslot" data-finding="${esc(c.finding)}"></div></div></div>`;
     }).join("") + "</div>";
+    $("out").querySelectorAll(".option").forEach((el) => {
+      const pick = () => {
+        const box = el.parentElement;
+        state.choices[box.dataset.finding] = el.dataset.option;
+        box.querySelectorAll(".option").forEach((o) => o.classList.toggle("chosen", o === el));
+        state.check = null; $("out").querySelectorAll(".checkslot").forEach((slot) => (slot.innerHTML = ""));
+      };
+      el.addEventListener("click", pick);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
+    $("check60").addEventListener("click", runCheck);
+    if (state.check) renderCheck(state.check);
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
     $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>

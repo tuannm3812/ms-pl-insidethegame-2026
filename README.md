@@ -3,7 +3,7 @@
 A multi-agent app that turns synthetic football events into an explained half-time briefing.
 The same intelligence goes to two audiences:
 
-- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence and a measurable target.
+- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence, clips to watch and a measurable target. Pick an option and **Check at 60'**: the verifier agent measures each target on the second half so far and says whether to keep or change.
 - **Fan mode**: a short story about your team and favourite player, in your language.
 
 Built for the Microsoft x Premier League *Inside the Game* hackathon.
@@ -24,10 +24,12 @@ Built for the Microsoft x Premier League *Inside the Game* hackathon.
 
 ```
 stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
+                                                 |
+                              at 60': stats (code) -> verifier
 ```
 
 - **Every number comes from code.** The model-backed agents only explain and decide, and their input carries the computed numbers they may quote. A model reply with the wrong shape, or with any number not in its input, is discarded and the rule-based version is used instead; the trace says so. This is a number filter: it cannot tell whether a matching number describes the right team or metric.
-- **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach and fan. The tactics agent also gets the metric functions as tools.
+- **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach, fan and the verifier (`POST /api/check`, which re-measures the coach's targets on the second half up to 60' and words a keep-or-change verdict). The tactics agent also gets the metric functions as tools.
 - **Backend:** a model in Microsoft Foundry, configured in `.env` either keyless (`FOUNDRY_PROJECT_ENDPOINT` + `FOUNDRY_MODEL`, Entra ID sign-in) or with a key (`AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_DEPLOYMENT`). Plain OpenAI (`OPENAI_API_KEY`) also works.
 - **No model configured:** each agent falls back to a rule-based version with the same output shape, so the demo always runs. The same fallback catches a model reply that can't be parsed.
 - **MCP:** `halftime/mcp_server.py` exposes the same tools over MCP, so GitHub Copilot agent mode or a Foundry agent can query the match directly.

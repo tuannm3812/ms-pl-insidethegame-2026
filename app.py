@@ -8,10 +8,19 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
-from halftime.agents import backend_name, half_time_briefing, make_client
+from halftime.agents import (
+    CHECK_MINUTE,
+    backend_name,
+    check_changes,
+    check_findings,
+    half_time_briefing,
+    make_client,
+    second_half_check,
+)
 from halftime.generator import generate_match
 
 DEFAULT_SEED = 27
@@ -83,3 +92,33 @@ async def briefing(
         language=language,
         client=client,
     )
+
+
+class CheckRequest(BaseModel):
+    """The half-time calls to check, plus which option the coach chose."""
+
+    seed: int = DEFAULT_SEED
+    focus: str = Field("home", pattern="^(home|away)$")
+    until: int = Field(CHECK_MINUTE, ge=46, le=90)
+    choices: dict[str, str] = Field(default_factory=dict)
+    findings: list[dict]
+    changes: list[dict]
+
+
+@app.post("/api/check")
+async def check(req: CheckRequest) -> dict:
+    """Check the chosen options against the second half so far."""
+    try:
+        findings = check_findings(req.findings)
+        changes = check_changes(req.changes)
+        return await second_half_check(
+            match(req.seed),
+            findings=findings,
+            changes=changes,
+            focus=req.focus,
+            choices=req.choices,
+            until=req.until,
+            client=client,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

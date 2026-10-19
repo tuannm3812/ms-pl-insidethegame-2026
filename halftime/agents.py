@@ -9,6 +9,8 @@ Five roles, run in order:
                       pressure, rhythm)
   4. Coach agent      offers two options per finding, each with its
                       trade-off (analyst mode)
+     Verifier agent   at 60', checks the chosen option against its target
+                      (analyst mode, on request)
      Fan agent        turns them into a story about your team/player
                       (fan mode)
   5. Overlay agent    renders timed, machine-readable graphics cards
@@ -1181,8 +1183,321 @@ number is discarded.
 
 
 # ---------------------------------------------------------------------------
+# The 60' check: did the chosen option do what the coach asked to watch?
+# ---------------------------------------------------------------------------
+
+CHECK_MINUTE = 60
+OPTIONS = ("a", "b")
+
+
+def second_half_events(events: list[dict], until: int) -> list[dict]:
+    """Second-half events before `until`, dropping first-half stoppage time."""
+    return [e for e in events if e["half"] == 2 and e["minute"] < until]
+
+
+def check_targets(
+    facts: dict,
+    match: dict,
+    findings: list[dict],
+    focus: str,
+    until: int = CHECK_MINUTE,
+) -> list[dict]:
+    """Measure each coach target on the second half so far, in code.
+
+    Mirrors the targets `coach_offline` asks the coach to watch, so a model
+    coach quoting the same targets is checked against the same numbers.
+    """
+    ev = second_half_events(match["events"], until)
+    minutes = until - 45
+    opp = other(focus)
+    names = facts["teams"]
+    by_id = {f["id"]: f for f in findings}
+    summary = {s: metrics.team_summary(ev, s) for s in SIDES}
+    targets = coach_targets(facts, focus)
+    checks = []
+
+    press = by_id["press"]
+    if press["team"] == opp:
+        lost = _own_half_losses(facts, focus)
+        value = _per_min(summary[focus]["turnovers_in_own_half"], minutes)
+        checks.append(
+            {
+                "finding": "press",
+                "label": f"{names[focus]} balls lost in own half per min",
+                "value": value,
+                "target": lost["before"],
+                "direction": "below",
+                "on_track": value < lost["before"],
+            }
+        )
+    else:
+        lost = _own_half_losses(facts, opp)
+        value = _per_min(summary[opp]["turnovers_in_own_half"], minutes)
+        checks.append(
+            {
+                "finding": "press",
+                "label": f"{names[opp]} balls lost in own half per min",
+                "value": value,
+                "target": lost["after"],
+                "direction": "at_least",
+                "on_track": value >= lost["after"],
+            }
+        )
+
+    threat = by_id["threat"]
+    if threat["team"] == opp:
+        share = metrics.threat_channels(ev, opp)[threat["channel"]]
+        limit = targets["opponent_threat_share_in_channel_pct_below"]
+        checks.append(
+            {
+                "finding": "threat",
+                "label": (
+                    f"{names[opp]} share of threat down the "
+                    f"{threat['channel']} %"
+                ),
+                "value": share,
+                "target": limit,
+                "direction": "below",
+                "on_track": share < limit,
+            }
+        )
+    else:
+        value = _per_10(summary[focus]["xt_created"], minutes)
+        first_half = _per_10(facts["summary"][focus]["xt_created"], 45)
+        checks.append(
+            {
+                "finding": "threat",
+                "label": f"{names[focus]} threat (xT) per 10 min",
+                "value": value,
+                "target": first_half,
+                "direction": "at_least",
+                "on_track": value >= first_half,
+            }
+        )
+
+    # The xG target covers the whole half, so pace it to the minutes played.
+    pace = round(targets["opponent_second_half_xg_below"] * minutes / 45, 2)
+    xg = summary[opp]["xg"]
+    checks.append(
+        {
+            "finding": "scoreline",
+            "label": (
+                f"{names[opp]} xG since the break (target paced to {until}')"
+            ),
+            "value": xg,
+            "target": pace,
+            "direction": "below",
+            "on_track": xg < pace,
+        }
+    )
+    for c in checks:
+        c["minutes"] = minutes
+    return checks
+
+
+def check_verdicts(verdicts: Any) -> list[dict]:
+    """Reject verifier output that is not one verdict per finding."""
+    _require(isinstance(verdicts, list), "verdicts must be a list")
+    _require(len(verdicts) == 3, "verdicts must be three items")
+    for v in verdicts:
+        _require(isinstance(v, dict), "each verdict must be an object")
+        _require(
+            v.get("finding") in FINDING_IDS,
+            f"verdict finding must be one of {FINDING_IDS}",
+        )
+        _require(
+            _is_text(v.get("verdict")) and v.get("next") in ("keep", "change"),
+            "verdict needs text and next of keep or change",
+        )
+    _require(
+        {v["finding"] for v in verdicts} == set(FINDING_IDS),
+        "verdicts must cover each finding once",
+    )
+    return verdicts
+
+
+def verify_offline(
+    checks: list[dict], changes: list[dict], choices: dict[str, str]
+) -> list[dict]:
+    """Rule-based verifier: one verdict per check, read from the numbers."""
+    by_id = {c["finding"]: c for c in changes}
+    verdicts = []
+    for c in checks:
+        chosen = choices.get(c["finding"], "a")
+        option = by_id[c["finding"]]
+        picked = option["action"] if chosen == "a" else option["alternative"]
+        other_option = (
+            option["alternative"] if chosen == "a" else option["action"]
+        )
+        goal = "under" if c["direction"] == "below" else "at least"
+        if c["on_track"]:
+            text = (
+                f"On track after {c['minutes']} minutes: {c['label']} is "
+                f"{c['value']}, {goal} the {c['target']} target. Keep "
+                f"option {chosen.upper()}: {picked}"
+            )
+            nxt = "keep"
+        else:
+            text = (
+                f"Not there yet after {c['minutes']} minutes: {c['label']} "
+                f"is {c['value']} against a target of {goal} "
+                f"{c['target']}. Consider option "
+                f"{'B' if chosen == 'a' else 'A'}: {other_option}"
+            )
+            nxt = "change"
+        verdicts.append(
+            {"finding": c["finding"], "verdict": text, "next": nxt}
+        )
+    return verdicts
+
+
+VERIFY_INSTRUCTIONS = """\
+You are the analyst checking in with the head coach at the given minute of the
+second half. For each finding you get the option the coach chose at half-time,
+the measurable target they were told to watch, and the value measured so far
+("checks", computed from the events). Say in one or two plain sentences
+whether the chosen option is doing its job, and whether to keep it or switch
+to the other option. Return a JSON list of {finding, verdict, next}, where
+next is "keep" or "change". Quote numbers only as they appear in "checks";
+never calculate or invent one. A reply with any other number is discarded.
+"""
+
+
+async def second_half_check(
+    match: dict,
+    *,
+    findings: list[dict],
+    changes: list[dict],
+    focus: str = "home",
+    choices: dict[str, str] | None = None,
+    until: int = CHECK_MINUTE,
+    client: BaseChatClient | None = None,
+) -> dict:
+    """Check the half-time calls against the second half so far.
+
+    The numbers come from code; the verifier agent only words the verdict
+    and falls back to rules like every other agent.
+    """
+    choices = {f: (choices or {}).get(f, "a") for f in FINDING_IDS}
+    _require(
+        all(c in OPTIONS for c in choices.values()),
+        "each choice must be a or b",
+    )
+    trace: list[dict] = []
+    started = time.perf_counter()
+    facts = metrics.half_time_facts(match)
+    checks = check_targets(facts, match, findings, focus, until)
+    _step(
+        trace,
+        "stats",
+        "deterministic",
+        started,
+        f"{len(second_half_events(match['events'], until))} events "
+        f"to {until}'",
+    )
+    by_id = {c["finding"]: c for c in changes}
+    chosen = {
+        f: by_id[f]["action"] if choices[f] == "a" else by_id[f]["alternative"]
+        for f in FINDING_IDS
+    }
+    verdicts = await _model_or_rules(
+        client,
+        match,
+        trace,
+        "verifier",
+        VERIFY_INSTRUCTIONS,
+        {
+            "focus_team": facts["teams"][focus],
+            "minute": until,
+            "chosen_options": chosen,
+            "watch": {f: by_id[f]["watch"] for f in FINDING_IDS},
+            "checks": checks,
+        },
+        lambda: verify_offline(checks, changes, choices),
+        check_verdicts,
+    )
+    return {
+        "match_id": facts["match_id"],
+        "focus": focus,
+        "focus_team": facts["teams"][focus],
+        "until": until,
+        "score": {
+            s: facts["score"][s]
+            + sum(
+                1
+                for e in second_half_events(match["events"], until)
+                if e["type"] == "goal" and e["team"] == s
+            )
+            for s in SIDES
+        },
+        "choices": choices,
+        "checks": checks,
+        "verdicts": verdicts,
+        "trace": trace,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
+
+def _step(
+    trace: list[dict], agent: str, backend: str, started: float, note: str = ""
+) -> None:
+    """Append one agent step to the briefing trace."""
+    trace.append(
+        {
+            "agent": agent,
+            "backend": backend,
+            "ms": round(1000 * (time.perf_counter() - started)),
+            "note": note,
+        }
+    )
+
+
+async def _model_or_rules(
+    client: BaseChatClient | None,
+    match: dict,
+    trace: list[dict],
+    agent: str,
+    instructions: str,
+    payload: dict,
+    fallback: Callable[[], Any],
+    check: Callable[[Any], Any],
+    use_tools: bool = False,
+    skip: tuple[str, ...] = (),
+) -> Any:
+    """Run a model-backed agent, or its rules when there is no client.
+
+    A reply that fails its shape or grounding check also falls back, and the
+    trace records why, so the output shape never changes.
+    """
+    started = time.perf_counter()
+    if client is not None:
+        try:
+            seen: list[str] = []
+            tools = build_tools(match, seen) if use_tools else None
+            out = await _run_agent(client, agent, instructions, payload, tools)
+            check(out)
+            allowed = grounded_numbers(payload, *(json.loads(t) for t in seen))
+            check_grounded(out, allowed, skip)
+            _step(trace, agent, backend_name(client), started)
+            return out
+        # A broken reply should not break the show.
+        except Exception as exc:
+            _step(
+                trace,
+                agent,
+                "offline-rules",
+                started,
+                f"model step failed ({type(exc).__name__}: "
+                f"{str(exc)[:120]}), used rules",
+            )
+            return fallback()
+    out = fallback()
+    _step(trace, agent, "offline-rules", started)
+    return out
 
 
 async def half_time_briefing(
@@ -1200,55 +1515,13 @@ async def half_time_briefing(
     is configured or a reply cannot be parsed, so the output shape never
     changes.
     """
-    trace = []
+    trace: list[dict] = []
 
-    def step(agent: str, backend: str, started: float, note: str = ""):
-        trace.append(
-            {
-                "agent": agent,
-                "backend": backend,
-                "ms": round(1000 * (time.perf_counter() - started)),
-                "note": note,
-            }
-        )
+    def step(agent: str, backend: str, started: float, note: str = "") -> None:
+        _step(trace, agent, backend, started, note)
 
-    async def model_or_rules(
-        agent: str,
-        instructions: str,
-        payload: dict,
-        fallback: Callable[[], Any],
-        check: Callable[[Any], Any],
-        use_tools: bool = False,
-        skip: tuple[str, ...] = (),
-    ) -> Any:
-        started = time.perf_counter()
-        if client is not None:
-            try:
-                seen: list[str] = []
-                tools = build_tools(match, seen) if use_tools else None
-                out = await _run_agent(
-                    client, agent, instructions, payload, tools
-                )
-                check(out)
-                allowed = grounded_numbers(
-                    payload, *(json.loads(t) for t in seen)
-                )
-                check_grounded(out, allowed, skip)
-                step(agent, backend_name(client), started)
-                return out
-            # A broken reply should not break the show.
-            except Exception as exc:
-                step(
-                    agent,
-                    "offline-rules",
-                    started,
-                    f"model step failed ({type(exc).__name__}: "
-                    f"{str(exc)[:120]}), used rules",
-                )
-                return fallback()
-        out = fallback()
-        step(agent, "offline-rules", started)
-        return out
+    async def model_or_rules(*args: Any, **kwargs: Any) -> Any:
+        return await _model_or_rules(client, match, trace, *args, **kwargs)
 
     started = time.perf_counter()
     facts = metrics.half_time_facts(match)

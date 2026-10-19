@@ -896,3 +896,42 @@ unchanged: seed 27 still turns at 25' with the away press.
 
 **Open.** Clips are listed, not linked to the replay; the overlay cards do
 not yet show them.
+
+## 2026-10-19 · Claude · The 60' check: verifier agent (PR #9)
+
+**Why.** From the research: an agent that follows up on its own advice is
+what none of the 2026 tools do, and it closes the loop the pitch
+describes (plan, brief, decide, verify). The coach now offers two options,
+so the analyst can pick one and ask at 60' whether its target is being met.
+
+**Changed.** `halftime/agents.py`: `_step` and `_model_or_rules` are now
+module level (previously closures inside `half_time_briefing`) so a second
+pipeline can share them; behaviour unchanged. New `second_half_events`,
+`check_targets` (one check per finding, mirroring the targets
+`coach_offline` sets: own-half losses per minute, opponent threat share in
+the channel or own xT per 10 min, opponent xG paced to the minute),
+`check_verdicts`, `verify_offline`, `VERIFY_INSTRUCTIONS` and
+`second_half_check`, which runs stats in code then the verifier agent
+with the usual shape check, grounding and fallback. `app.py`: `POST
+/api/check` takes focus, choices (a or b per finding), the briefing's
+findings and changes (validated with the existing `check_findings` and
+`check_changes`, 422 on failure). `static/index.html`: option cards are
+selectable (click or keyboard), a "Check at 60'" button posts the
+choices, and each call gets an On track / Not yet block with the measured
+value, the target, the verdict and the verifier backend. The block says
+that the synthetic second half is fixed, so the check shows whether the
+target is met, not what the option caused. README updated.
+
+**Verified.** Ruff format and check clean; `pytest` 43 passed. New tests:
+offline check for both focuses (on_track matches value against target
+and direction, verdict quotes the measured value, invalid choice
+rejected); a scripted verifier reply with an invented number falls back
+to rules and a good one is used; the API test posts a check and gets
+422 for two changes. Headless Chromium against the offline server: pick
+option B on the threat call, click Check at 60', three check blocks
+render, no page errors (`research/check60.png`). Seed 27 at 60': 1-1,
+all three targets not yet met with the defaults, so the verifier
+suggests switching; storyline unchanged.
+
+**Open.** Not run against the live model. The check minute is fixed at
+60' in the UI (the API accepts 46-90). The fan mode has no check yet.
