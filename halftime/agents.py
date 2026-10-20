@@ -283,7 +283,10 @@ def _evidence_value_ok(item: dict) -> bool:
         )
     value = item.get("value")
     if isinstance(value, dict):
-        return bool(value) and all(_is_number(v) for v in value.values())
+        # Channel shares are None for a team with no threatening pass.
+        return bool(value) and all(
+            v is None or _is_number(v) for v in value.values()
+        )
     return _is_number(value) or _is_text(value)
 
 
@@ -543,14 +546,16 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
     target the analyst sees is exactly the target that gets checked.
 
     Returns:
-        Finding id mapped to {label, target, direction, text}; direction is
-        "below" or "at_least".
+        Finding id mapped to {id, label, target, direction, text, policy};
+        direction is "below" or "at_least". `id` names the target version,
+        so a decision record can say which target it adopted; `policy` says
+        where the threshold comes from.
     """
     names = facts["teams"]
     opp = other(focus)
     by_id = {f["id"]: f for f in findings}
     targets = coach_targets(facts, focus)
-    watch = {}
+    watch: dict[str, dict] = {}
 
     if by_id["press"]["team"] == opp:
         lost = _own_half_losses(facts, focus)
@@ -562,6 +567,7 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
                 f"Balls lost in our half back under {lost['before']} a "
                 f"minute (now {lost['after']})."
             ),
+            "policy": "from the first half",
         }
     else:
         lost = _own_half_losses(facts, opp)
@@ -573,6 +579,7 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
                 f"Keep {names[opp]} losing the ball in their half at "
                 f"least {lost['after']} times a minute."
             ),
+            "policy": "from the first half",
         }
 
     threat = by_id["threat"]
@@ -588,6 +595,7 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
                 f"Their share of threat down the {threat['channel']} "
                 f"below {limit}%."
             ),
+            "policy": "proposed limit, not validated",
         }
     else:
         level = _per_10(facts["summary"][focus]["xt_created"], 45)
@@ -599,6 +607,7 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
                 f"Our threat (xT) per 10 minutes stays at least {level}, "
                 "our first-half level."
             ),
+            "policy": "from the first half",
         }
 
     xg = targets["opponent_second_half_xg_below"]
@@ -607,8 +616,102 @@ def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
         "target": xg,
         "direction": "below",
         "text": f"Their xG for the second half under {xg}.",
+        "policy": "half the first-half xG, at least 0.3",
     }
+    for fid, w in watch.items():
+        w["id"] = target_id(fid, focus)
     return watch
+
+
+TARGET_VERSION = "v1"
+
+
+def target_id(finding: str, focus: str) -> str:
+    """Stable reference to the Watch target for one finding and focus."""
+    return f"{finding}.{focus}.{TARGET_VERSION}"
+
+
+def _situation(finding: dict, focus: str) -> str:
+    """Whether a finding is against the focus team, for it, or either."""
+    if finding["id"] == "scoreline":
+        return "any"
+    return "against" if finding["team"] == other(focus) else "for"
+
+
+# Rules-written prompts for the analyst, not model output and not measured:
+# one alternative explanation per kind of finding, what would tell the two
+# apart, and when each option fits (option a, option b).
+ALTERNATIVES = {
+    ("press", "against"): (
+        "Our build-up got worse on its own (tired legs, loose first "
+        "touches), so the losses would have risen without their press.",
+        "Whether our own-half losses come with a presser close by or not; "
+        "the clips of the losses settle it.",
+    ),
+    ("press", "for"): (
+        "They chose to go long and gave the ball away, rather than our "
+        "press forcing errors.",
+        "Whether their losses come from pressured passes; the clips of "
+        "their losses settle it.",
+    ),
+    ("threat", "against"): (
+        "They had few attacks, so a handful of passes down one channel "
+        "looks like a pattern.",
+        "How many of their threatening passes went down that channel, and "
+        "the clips.",
+    ),
+    ("threat", "for"): (
+        "Their shape leaves that channel open by design and may close it "
+        "after the break.",
+        "Whether our threat there holds once they make their next change.",
+    ),
+    ("scoreline", "any"): (
+        "The gap is a few chances either way, not a pattern of play.",
+        "The shot list and the clips of the big chances.",
+    ),
+}
+BEST_WHEN = {
+    ("press", "against"): (
+        "our quick forward can run behind a back line that pushes up",
+        "the keeper and centre-backs are calm on the ball under pressure",
+    ),
+    ("press", "for"): (
+        "the front line still has the legs to keep pressing",
+        "after the hour, or when the lead needs protecting",
+    ),
+    ("threat", "against"): (
+        "their threat really does come from that one channel",
+        "they switch play often, so a winger cannot keep tracking back",
+    ),
+    ("threat", "for"): (
+        "the channel stays open after the break",
+        "they shift their cover to that side",
+    ),
+    ("scoreline", "any"): (
+        "the first-half pattern holds after the break",
+        "they change shape or personnel at the break",
+    ),
+}
+
+
+def rules_notes(findings: list[dict], focus: str) -> dict:
+    """Rules-written alternative, tell-apart and best-when text per finding.
+
+    Attached after the model steps, so the model schemas do not change and
+    the page can label this text as written by rules.
+    """
+    out = {}
+    for f in findings:
+        key = (f["id"], _situation(f, focus))
+        alt, tell = ALTERNATIVES[key]
+        best_a, best_b = BEST_WHEN[key]
+        out[f["id"]] = {
+            "alternative": alt,
+            "tell_apart": tell,
+            "best_when": {"a": best_a, "b": best_b},
+            "source": "rules",
+        }
+    return out
 
 
 def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
@@ -678,7 +781,8 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
     # 2. Where the dominant team's threat comes from since the turning point.
     dominant = max(SIDES, key=lambda s: a[s]["xt_created"] + a[s]["xg"])
     channels = metrics.threat_channels(after_events, dominant)
-    channel = max(channels, key=channels.get)
+    channel = max(channels, key=lambda k: channels[k] or 0.0)
+    share = channels[channel]
     after_players = metrics.player_stats(after_events, match)
     creators = sorted(
         (p for p in after_players.values() if p["team"] == dominant),
@@ -691,7 +795,9 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
             "team": dominant,
             "title": (
                 f"{names[dominant]} are getting in down the {channel} "
-                f"({channels[channel]:.0f}% of their threat since {t}')"
+                f"({share:.0f}% of their threat since {t}')"
+                if share is not None
+                else f"{names[dominant]} have no threatening pass since {t}'"
             ),
             "evidence": [
                 {
@@ -1284,54 +1390,134 @@ def check_targets(
 
     Targets come from `watch_targets`, the same place the coach's Watch line
     is written from, so the check measures exactly what the analyst was shown.
+    Each check also carries how many events it rests on, the value from the
+    turning point to half-time, a status under the proposed evidence policy
+    and, for a call against the focus team, a cost guardrail.
     """
     ev = second_half_events(match["events"], until)
+    late_ev = [
+        e
+        for e in metrics.window(match["events"])
+        if e["minute"] >= facts["turning_point"]["minute"]
+    ]
     minutes = until - 45
     opp = other(focus)
+    names = facts["teams"]
+    tp = facts["turning_point"]
+    late = tp["after"]
     by_id = {f["id"]: f for f in findings}
     summary = {s: metrics.team_summary(ev, s) for s in SIDES}
     watch = watch_targets(facts, findings, focus)
 
-    side = focus if by_id["press"]["team"] == opp else opp
-    threat = by_id["threat"]
-    values = {
-        "press": _per_min(summary[side]["turnovers_in_own_half"], minutes),
-        "threat": (
-            metrics.threat_channels(ev, opp)[threat["channel"]]
-            if threat["team"] == opp
-            else _per_10(summary[focus]["xt_created"], minutes)
-        ),
-        "scoreline": summary[opp]["xg"],
-    }
+    def late_xt_per_10(side: str) -> float:
+        return _per_10(late[side]["xt_created"], late[side]["minutes"])
+
     checks = []
     for fid in FINDING_IDS:
-        w = watch[fid]
-        label, target = w["label"], w["target"]
-        if fid == "scoreline":
+        f, w = by_id[fid], watch[fid]
+        label, target, direction = w["label"], w["target"], w["direction"]
+        se = None
+        if fid == "press":
+            side = focus if f["team"] == opp else opp
+            n = summary[side]["turnovers_in_own_half"]
+            value = _per_min(n, minutes)
+            unit = "balls lost in own half"
+            baseline = _per_min(
+                late[side]["turnovers_in_own_half"], late[side]["minutes"]
+            )
+            se = metrics.rate_se(n, minutes)
+            minimum = metrics.MIN_RATE_EVENTS
+            rule = (
+                f"at least {minimum} events; too close to call within one "
+                "standard error (square root of the count, per minute)"
+            )
+        elif f["team"] == opp:
+            n = metrics.threat_passes(ev, opp)
+            value = metrics.threat_channels(ev, opp)[f["channel"]]
+            unit = f"threatening passes by {names[opp]}"
+            baseline = metrics.threat_channels(late_ev, opp)[f["channel"]]
+            minimum = metrics.MIN_SHARE_PASSES
+            rule = (
+                f"at least {minimum} threatening passes; no too-close rule "
+                "for a share yet"
+            )
+        elif fid == "threat":
+            n = metrics.threat_passes(ev, focus)
+            value = _per_10(summary[focus]["xt_created"], minutes)
+            unit = "threatening passes"
+            baseline = late_xt_per_10(focus)
+            minimum = metrics.MIN_SHARE_PASSES
+            rule = (
+                f"at least {minimum} threatening passes; no too-close rule "
+                "for xT yet"
+            )
+        else:
+            n = summary[opp]["shots"]
+            value = summary[opp]["xg"]
             # The xG target covers the whole half, so pace it to the minutes.
             target = round(target * minutes / 45, 2)
             label = f"{label} (target paced to {until}')"
-        value = values[fid]
+            unit = f"shots by {names[opp]}"
+            baseline = None
+            minimum = metrics.MIN_SHOTS
+            rule = (
+                f"at least {minimum} shots; the whole-half target "
+                f"{w['target']} is paced to {minutes} minutes"
+            )
+        status = metrics.evidence_status(
+            value, target, direction, n, minimum, se
+        )
+        guardrail = None
+        if fid != "scoreline" and f["team"] == opp:
+            passes = metrics.threat_passes(ev, focus)
+            guardrail = {
+                "label": f"{names[focus]} threat (xT) per 10 min",
+                "value": _per_10(summary[focus]["xt_created"], minutes),
+                "reference": late_xt_per_10(focus),
+                "reference_label": f"{tp['minute']}' to half-time",
+                "n": passes,
+                "enough": passes >= metrics.MIN_SHARE_PASSES,
+                "why": (
+                    "Both options give something up in attack, so watch "
+                    "that our threat does not collapse."
+                ),
+            }
         checks.append(
             {
                 "finding": fid,
+                "target_id": w["id"],
                 "label": label,
                 "value": value,
                 "target": target,
-                "direction": w["direction"],
-                "on_track": (
-                    value < target
-                    if w["direction"] == "below"
-                    else value >= target
-                ),
+                "direction": direction,
+                "policy": w["policy"],
+                "status": status,
+                # Kept for older clients: on track means the target is met.
+                "on_track": status == "met",
+                "n": n,
+                "unit": unit,
+                "window": f"46'-{until}'",
                 "minutes": minutes,
+                "baseline": baseline,
+                "se": None if se is None else round(se, 2),
+                "rule": rule,
+                "guardrail": guardrail,
             }
         )
     return checks
 
 
-def check_verdicts(verdicts: Any) -> list[dict]:
-    """Reject verifier output that is not one verdict per finding."""
+NEXT_STEPS = ("keep", "review")
+
+
+def check_verdicts(
+    verdicts: Any, checks: list[dict] | None = None
+) -> list[dict]:
+    """Reject verifier output that is not one verdict per finding.
+
+    With the checks, also reject "keep" for a target that is not met: a miss,
+    a too-close result or thin evidence goes back to the staff for review.
+    """
     _require(isinstance(verdicts, list), "verdicts must be a list")
     _require(len(verdicts) == 3, "verdicts must be three items")
     for v in verdicts:
@@ -1341,47 +1527,74 @@ def check_verdicts(verdicts: Any) -> list[dict]:
             f"verdict finding must be one of {FINDING_IDS}",
         )
         _require(
-            _is_text(v.get("verdict")) and v.get("next") in ("keep", "change"),
-            "verdict needs text and next of keep or change",
+            _is_text(v.get("verdict")) and v.get("next") in NEXT_STEPS,
+            "verdict needs text and next of keep or review",
         )
     _require(
         {v["finding"] for v in verdicts} == set(FINDING_IDS),
         "verdicts must cover each finding once",
     )
+    if checks is not None:
+        status = {c["finding"]: c["status"] for c in checks}
+        _require(
+            all(
+                v["next"] == "review" or status[v["finding"]] == "met"
+                for v in verdicts
+            ),
+            "next may be keep only when the target is met",
+        )
     return verdicts
 
 
 def verify_offline(
     checks: list[dict], changes: list[dict], choices: dict[str, str]
 ) -> list[dict]:
-    """Rule-based verifier: one verdict per check, read from the numbers."""
+    """Rule-based verifier: one verdict per check, read from the numbers.
+
+    It never tells the coach to switch: a missed target goes back to the
+    staff, and a too-close or thin result is not a verdict at all.
+    """
     by_id = {c["finding"]: c for c in changes}
     verdicts = []
     for c in checks:
         chosen = choices.get(c["finding"], "a")
         option = by_id[c["finding"]]
         picked = option["action"] if chosen == "a" else option["alternative"]
-        other_option = (
-            option["alternative"] if chosen == "a" else option["action"]
-        )
         goal = "under" if c["direction"] == "below" else "at least"
-        if c["on_track"]:
+        measured = (
+            f"{c['label']} is {c['value']} from {c['n']} {c['unit']} "
+            f"in {c['window']}"
+        )
+        status = c["status"]
+        if status == "met":
             text = (
-                f"On track after {c['minutes']} minutes: {c['label']} is "
-                f"{c['value']}, {goal} the {c['target']} target. Keep "
-                f"option {chosen.upper()}: {picked}"
+                f"Target met so far: {measured}, {goal} the {c['target']} "
+                f"target. Keep option {chosen.upper()} under review: "
+                f"{picked}"
             )
-            nxt = "keep"
+        elif status == "not_met":
+            text = (
+                f"Target not met: {measured}, against a target of {goal} "
+                f"{c['target']}. Review it with the staff before changing "
+                "anything."
+            )
+        elif status == "too_close":
+            text = (
+                f"Too close to call after {c['minutes']} minutes: "
+                f"{measured}, against a target of {goal} {c['target']}. "
+                "Not a verdict yet; look again later."
+            )
         else:
             text = (
-                f"Not there yet after {c['minutes']} minutes: {c['label']} "
-                f"is {c['value']} against a target of {goal} "
-                f"{c['target']}. Consider option "
-                f"{'B' if chosen == 'a' else 'A'}: {other_option}"
+                f"Not enough evidence yet: only {c['n']} {c['unit']} in "
+                f"{c['window']}. Not a verdict; look again later."
             )
-            nxt = "change"
         verdicts.append(
-            {"finding": c["finding"], "verdict": text, "next": nxt}
+            {
+                "finding": c["finding"],
+                "verdict": text,
+                "next": "keep" if status == "met" else "review",
+            }
         )
     return verdicts
 
@@ -1390,12 +1603,57 @@ VERIFY_INSTRUCTIONS = """\
 You are the analyst checking in with the head coach at the given minute of the
 second half. For each finding you get the option the coach chose at half-time,
 the measurable target they were told to watch, and the value measured so far
-("checks", computed from the events). Say in one or two plain sentences
-whether the chosen option is doing its job, and whether to keep it or switch
-to the other option. Return a JSON list of {finding, verdict, next}, where
-next is "keep" or "change". Quote numbers only as they appear in "checks";
-never calculate or invent one. A reply with any other number is discarded.
+("checks", computed from the events), with its status: met, not_met, too_close
+or insufficient. Say in one or two plain sentences what the check shows. A
+too_close or insufficient result is not a verdict: say so, and that it needs
+another look later. Never tell the coach to switch to the other option; a
+missed target goes back to the staff to review. Return a JSON list of
+{finding, verdict, next}, where next is "keep" only when the status is met and
+"review" otherwise. Quote numbers only as they appear in "checks"; never
+calculate or invent one. A reply with any other number is discarded.
 """
+
+
+DECISION_STATUSES = ("open", "adopted", "deferred", "rejected")
+
+
+def check_decisions(decisions: Any, watch: dict) -> dict[str, dict]:
+    """Validate the analyst's decision record against the current targets.
+
+    Raises:
+        ValueError: A decision names an unknown finding, option or status,
+            claims implementation without adoption, or adopted a target that
+            is not the one the check would measure.
+    """
+    if not isinstance(decisions, dict):
+        raise ValueError("decisions must be an object")
+    out = {}
+    for fid, d in decisions.items():
+        if fid not in FINDING_IDS or not isinstance(d, dict):
+            raise ValueError(f"decision for unknown finding {fid!r}")
+        option, status = d.get("option"), d.get("status", "open")
+        if option is not None and option not in OPTIONS:
+            raise ValueError(f"{fid}: option must be a, b or null")
+        if status not in DECISION_STATUSES:
+            raise ValueError(
+                f"{fid}: status must be one of {DECISION_STATUSES}"
+            )
+        implemented = bool(d.get("implemented", False))
+        if implemented and status != "adopted":
+            raise ValueError(f"{fid}: only an adopted option can be in place")
+        tid = d.get("target_id")
+        if tid is not None and tid != watch[fid]["id"]:
+            raise ValueError(
+                f"{fid}: target {tid!r} is not the current target "
+                f"{watch[fid]['id']!r}; reload the briefing"
+            )
+        out[fid] = {
+            "option": option,
+            "status": status,
+            "implemented": implemented,
+            "target_id": watch[fid]["id"],
+        }
+    return out
 
 
 async def second_half_check(
@@ -1405,22 +1663,30 @@ async def second_half_check(
     changes: list[dict],
     focus: str = "home",
     choices: dict[str, str] | None = None,
+    decisions: dict[str, dict] | None = None,
     until: int = CHECK_MINUTE,
     client: BaseChatClient | None = None,
 ) -> dict:
     """Check the half-time calls against the second half so far.
 
     The numbers come from code; the verifier agent only words the verdict
-    and falls back to rules like every other agent.
+    and falls back to rules like every other agent. When the analyst sends
+    a decision record, the options come from it and each adopted target must
+    still be the one the check measures.
     """
-    choices = {f: (choices or {}).get(f, "a") for f in FINDING_IDS}
+    facts = metrics.half_time_facts(match)
+    watch = watch_targets(facts, findings, focus)
+    record = check_decisions(decisions, watch) if decisions else {}
+    picked = {f: d["option"] for f, d in record.items() if d["option"]}
+    choices = {
+        f: picked.get(f) or (choices or {}).get(f, "a") for f in FINDING_IDS
+    }
     _require(
         all(c in OPTIONS for c in choices.values()),
         "each choice must be a or b",
     )
     trace: list[dict] = []
     started = time.perf_counter()
-    facts = metrics.half_time_facts(match)
     checks = check_targets(facts, match, findings, focus, until)
     _step(
         trace,
@@ -1445,14 +1711,11 @@ async def second_half_check(
             "focus_team": facts["teams"][focus],
             "minute": until,
             "chosen_options": chosen,
-            "watch": {
-                f: w["text"]
-                for f, w in watch_targets(facts, findings, focus).items()
-            },
+            "watch": {f: w["text"] for f, w in watch.items()},
             "checks": checks,
         },
         lambda: verify_offline(checks, changes, choices),
-        check_verdicts,
+        lambda out: check_verdicts(out, checks),
     )
     return {
         "match_id": facts["match_id"],
@@ -1469,6 +1732,7 @@ async def second_half_check(
             for s in SIDES
         },
         "choices": choices,
+        "decisions": record,
         "checks": checks,
         "verdicts": verdicts,
         "trace": trace,
@@ -1650,10 +1914,8 @@ async def half_time_briefing(
             }
             for p in match["teams"][focus]["players"]
         ]
-        watch = {
-            f: w["text"]
-            for f, w in watch_targets(facts, findings, focus).items()
-        }
+        targets = watch_targets(facts, findings, focus)
+        watch = {f: w["text"] for f, w in targets.items()}
         changes = await model_or_rules(
             "coach",
             COACH_INSTRUCTIONS,
@@ -1675,8 +1937,14 @@ async def half_time_briefing(
             coach["note"] = (
                 coach["note"] + "; " if coach["note"] else ""
             ) + "watch lines set from code"
+        # Added after the model step, so the coach schema is unchanged: the
+        # typed target a decision adopts, and rules-written prompts the page
+        # labels as such.
+        notes = rules_notes(findings, focus)
         for c in changes:
             c["watch"] = watch[c["finding"]]
+            c["target"] = targets[c["finding"]]
+            c["rules"] = notes[c["finding"]]
         result["changes"] = changes
     else:
         players = {p["name"]: p for p in facts["players"].values()}

@@ -181,6 +181,46 @@
   .option .cost { color: var(--text-secondary); }
   .option .cost b { font-weight: 700; margin-right: 4px; }
   @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  /* Claude v2: priority summary, decision record and follow-up inside each call */
+  .summary { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 6px; }
+  .summary li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "n t b" "n s b"; column-gap: 10px;
+                align-items: center; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid transparent; }
+  .summary li.first { border-color: var(--accent); }
+  .summary .num { grid-area: n; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+                  background: var(--accent); color: var(--accent-text); font-weight: 800; font-size: 14px; }
+  .summary .t { grid-area: t; font-weight: 650; font-size: 14px; line-height: 1.3; }
+  .summary .st { grid-area: s; font-size: 12px; color: var(--text-secondary); }
+  .summary .pin, .summary .btn { grid-area: b; }
+  .summary .pin { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+  .unranked { font-size: 12px; margin: 4px 0 10px; color: var(--text-secondary); }
+  .btn.small { font-size: 12px; padding: 4px 10px; min-height: 0; }
+  .btn.small[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .change h3 { font-size: 17px; }
+  .change:not(.open) { padding-bottom: 10px; }
+  .change .tags .tag { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--text-secondary); }
+  .sect { margin: 10px 0 2px; font-size: 12px; }
+  .sect > b { color: var(--accent); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-display); font-size: 13px; }
+  .src { font-size: 11px; color: var(--text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  details.alt { font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--border); margin: 6px 0; }
+  details.alt summary { color: var(--text-primary); }
+  details.alt p { margin: 6px 0 0; }
+  .decide { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; font-size: 13px; }
+  .decide .state { flex: 1 1 100%; color: var(--text-secondary); }
+  .decide .state b { color: var(--text-primary); }
+  .decide .impl { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; color: var(--text-secondary); }
+  .change .body > p { font-size: 14px; }
+  .pipecard > summary { cursor: pointer; list-style: none; }
+  .pipecard > summary::-webkit-details-marker { display: none; }
+  .pipecard > summary h2::after { content: " ▾"; color: var(--text-muted); }
+  .pipecard:not([open]) > summary h2::after { content: " ▸"; }
+  /* On a narrow screen the calls come first; charts follow. */
+  @media (max-width: 860px) { .grid > .stack:last-child { order: -1; } }
+  .reports a { color: var(--accent); font-weight: 600; }
+  .check.mid { border-inline-start-color: var(--warn); }
+  .check.mid b.badge { color: var(--warn); }
+  .check details { margin-top: 6px; }
+  .check details p { margin: 4px 0 0; }
+
   .moments { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .moments > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; font-family: var(--font-display); }
   .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
@@ -312,11 +352,11 @@
     <button class="btn" id="replay">▶ Replay first half live</button>
   </div>
 
-  <section class="card" aria-labelledby="pipeHead">
-    <div class="card-head">
+  <details class="card pipecard" id="pipeCard" open>
+    <summary class="card-head">
       <h2 id="pipeHead">The agent pipeline</h2>
       <span class="muted" id="pipeTotal"></span>
-    </div>
+    </summary>
     <div class="pipeline" id="pipeline"></div>
     <div class="pipe-foot">
       <span><span class="kind data">code</span> computes every number</span>
@@ -324,7 +364,7 @@
       <span><span class="kind rules">rules</span> same output with no model</span>
       <span><span class="kind fallback">fallback</span> model reply rejected, rules used</span>
     </div>
-  </section>
+  </details>
 
   <div class="grid">
     <div class="stack">
@@ -385,7 +425,9 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null };
+// Claude v2: on a narrow screen the pipeline starts folded so the calls show sooner.
+document.addEventListener("DOMContentLoaded", () => { if (matchMedia("(max-width: 860px)").matches) document.getElementById("pipeCard").open = false; });
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null, dec: {}, first: null, open: new Set() };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tip = $("tip");
@@ -465,7 +507,7 @@ function clearCheck() {
 
 async function load() {
   const token = ++state.req;
-  state.choices = {}; clearCheck();
+  state.choices = {}; state.dec = {}; state.first = null; state.open = new Set(); clearCheck();
   setBusy(true);
   drawPipeline(null);
   $("pipeTotal").textContent = "";
@@ -753,7 +795,33 @@ function momentChips(f) {
   return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
 }
 
-const choice = (finding) => state.choices[finding] || "a";
+// ---- Claude v2: decide and follow up inside each call --------------------
+// Decision state lives in the page only. Each call has a drafted option (none
+// until the analyst picks), a decision (open, adopted, deferred, rejected) and,
+// separately, whether the change was confirmed in place at the restart.
+const FINDINGS = ["press", "threat", "scoreline"];
+const dec = (f) => (state.dec[f] = state.dec[f] || { draft: null, status: "open", implemented: false });
+const choice = (f) => dec(f).draft || "a";
+const changeFor = (f) => ((state.data && state.data.changes) || []).find((c) => c.finding === f) || {};
+// The decision record sent with a check: the server rejects a target that is
+// no longer the one it would measure.
+const decisions = () => Object.fromEntries(FINDINGS.map((f) => {
+  const d = dec(f);
+  return [f, { option: d.draft, status: d.status, implemented: d.implemented, target_id: (changeFor(f).target || {}).id || null }];
+}));
+
+function decisionLabel(f) {
+  const d = dec(f), opt = d.draft ? "Option " + d.draft.toUpperCase() : "";
+  if (d.status === "adopted") return opt + " adopted";
+  if (d.status === "deferred") return "Deferred";
+  if (d.status === "rejected") return "Rejected: no change";
+  return d.draft ? opt + " drafted, not adopted" : "Not decided";
+}
+function implLabel(f) {
+  const d = dec(f);
+  if (d.status !== "adopted") return "";
+  return d.implemented ? "In place from the restart (46')" : "Not confirmed in place";
+}
 
 async function runCheck() {
   const d = state.data, btn = $("check60");
@@ -763,13 +831,16 @@ async function runCheck() {
   try {
     const res = await fetch("api/check", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ focus: d.focus, choices: { press: choice("press"), threat: choice("threat"), scoreline: choice("scoreline") }, findings: d.findings, changes: d.changes }),
+      body: JSON.stringify({ focus: d.focus, choices: Object.fromEntries(FINDINGS.map((f) => [f, choice(f)])), decisions: decisions(), findings: d.findings, changes: d.changes }),
     });
-    if (!res.ok) throw new Error("check request failed (" + res.status + ")");
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(typeof body.detail === "string" ? body.detail : "check request failed (" + res.status + ")");
+    }
     const check = await res.json();
     if (token !== state.checkReq || d !== state.data) return;
     state.check = check;
-    renderCheck(check);
+    renderOutput(d);
   } catch (err) {
     if (token !== state.checkReq || d !== state.data) return;
     $("out").querySelector(".checkbar .muted").textContent = "Could not run the check: " + err.message + ". Try again.";
@@ -778,18 +849,77 @@ async function runCheck() {
   }
 }
 
-function renderCheck(k) {
-  const verdicts = Object.fromEntries(k.verdicts.map((v) => [v.finding, v]));
-  const agent = k.trace.find((t) => t.agent === "verifier") || {};
-  for (const c of k.checks) {
-    const slot = $("out").querySelector(`.checkslot[data-finding="${c.finding}"]`);
-    if (!slot) continue;
-    const v = verdicts[c.finding] || {};
-    const goal = c.direction === "below" ? "under" : "at least";
-    slot.innerHTML = `<div class="check ${c.on_track ? "ok" : "no"}"><b class="badge">${c.on_track ? "On track" : "Not yet"} · ${k.until}'</b><span class="meta">${esc(c.label)}: <b>${esc(c.value)}</b> (target ${goal} ${esc(c.target)}) · score ${k.score.home}–${k.score.away}</span>
-      <p>${esc(v.verdict || "")}</p>
-      <p class="meta">Verifier: ${esc(agent.backend || "")}${agent.ms ? " · " + agent.ms + " ms" : ""}. Synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
+const STATUS = {
+  met: ["ok", "Target met so far"],
+  not_met: ["no", "Target not met"],
+  too_close: ["mid", "Too close to call"],
+  insufficient: ["mid", "Not enough evidence"],
+};
+function followUp(f, c) {
+  const k = state.check;
+  if (!k || k.focus !== state.data.focus) return "";
+  const x = (k.checks || []).find((y) => y.finding === f);
+  if (!x) return "";
+  const g = x.guardrail, d = dec(f);
+  const [cls, badge] = STATUS[x.status] || ["mid", "No result"];
+  const goal = x.direction === "below" ? "under" : "at least";
+  const v = (k.verdicts || []).find((y) => y.finding === f) || {};
+  const agent = (k.trace || []).find((t) => t.agent === "verifier") || {};
+  let moved = "";
+  if (x.baseline != null && x.value != null && x.value !== x.baseline) {
+    const better = x.direction === "below" ? x.value < x.baseline : x.value > x.baseline;
+    moved = ` Moved from ${esc(x.baseline)} at the end of the first half (${better ? "better" : "worse"}).`;
   }
+  const next = {
+    met: "Keep reviewing; one window is not proof the option worked.",
+    not_met: "Review with staff: keep, adjust, or look again at option " + (choice(f) === "a" ? "B" : "A") + " (context, not a recommendation).",
+    too_close: "Too close to call after " + x.minutes + " minutes; look again later.",
+    insufficient: "Not enough play yet to judge: " + x.n + " " + x.unit + (x.value === null ? ", nothing to measure." : "."),
+  }[x.status] || "";
+  const decided = d.status === "adopted"
+    ? (d.implemented ? "Adopted and in place from 46'." : "Adopted, but not confirmed in place, so read this with care.")
+    : "Not adopted. Shown for monitoring only.";
+  const guard = g
+    ? `<p class="meta"><b>Cost check</b> ${esc(g.label)}: <b>${esc(g.value)}</b> against ${esc(g.reference)} from ${esc(g.reference_label)}${g.enough ? "" : " (too few passes to read)"}. ${esc(g.why)} <i>Proposed policy; a comparison, not a pass or fail.</i></p>`
+    : `<p class="meta"><b>Cost check</b> No measurable cost defined for this call.</p>`;
+  return `<div class="check ${cls}"><b class="badge">${badge} · ${k.until}'</b><span class="meta">score ${k.score.home}–${k.score.away}</span>
+    <p>${esc(x.label)}: <b>${esc(x.value ?? "n/a")}</b> from ${esc(x.n)} ${esc(x.unit)} in ${esc(x.window)} (${x.minutes} min). Target ${goal} ${esc(x.target)}.${moved}</p>
+    <p><b>Next</b> ${esc(next)}</p>
+    <p class="meta"><b>Decision</b> ${esc(decided)}</p>
+    ${guard}
+    <details><summary>Evidence rule and verifier wording</summary>
+      <p class="meta">Evidence rule (proposed): ${esc(x.rule)}.</p>
+      <p class="meta">Verifier agent (${esc(agent.backend || "")}) said: ${esc(v.verdict || "")}</p></details>
+    <p class="meta">The synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
+}
+
+function callBody(c, f, x) {
+  const p = c.rules || {}, d = dec(c.finding), t = c.target || {};
+  const opt = (o, text, cost) => `<div class="option${d.draft === o ? " chosen" : ""}" data-option="${o}" role="button" tabindex="0" aria-pressed="${d.draft === o}">
+      <b>Option ${o.toUpperCase()}</b>${o === "a" ? '<span class="pick">coach agent\'s pick</span>' : ""}<span class="chosen-mark">✓ drafted</span>
+      <p>${esc(text)}</p><p class="cost"><b>Cost</b> ${esc(cost)}</p>
+      <p class="cost"><b>Best when</b> ${esc((p.best_when || {})[o] || "")} <span class="src">rules text</span></p></div>`;
+  return `<div class="body">
+    <div class="sect"><b>What we saw</b> <span class="src">measured, first half, before and after ${esc(f.minute)}'</span></div>
+    <div class="chips">${evidenceChips(f)}</div>
+    <div class="sect"><b>Why: leading explanation</b> <span class="src">explainer agent</span></div>
+    <p>${esc(x.why_it_matters || "")}</p>
+    <details class="alt"><summary><b>Or maybe:</b> ${esc(p.alternative || "")}</summary>
+      <p><b>What would tell them apart:</b> ${esc(p.tell_apart || "")}</p>
+      <p class="src">Written by rules, not by a model and not measured. The data cannot settle it; video can.</p></details>
+    <div class="sect"><b>Options</b> <span class="src">pick one to draft; nothing is chosen for you</span></div>
+    <div class="options" data-finding="${esc(c.finding)}">${opt("a", c.action, c.tradeoff)}${opt("b", c.alternative, c.alternative_tradeoff)}</div>
+    <div class="decide" data-finding="${esc(c.finding)}">
+      <span class="state"><b>${esc(decisionLabel(c.finding))}</b>${implLabel(c.finding) ? " · " + esc(implLabel(c.finding)) : ""}</span>
+      <button class="btn small" data-act="adopted" ${d.draft ? "" : "disabled"} aria-pressed="${d.status === "adopted"}">Adopt</button>
+      <button class="btn small" data-act="deferred" aria-pressed="${d.status === "deferred"}">Defer</button>
+      <button class="btn small" data-act="rejected" aria-pressed="${d.status === "rejected"}">Reject</button>
+      <label class="impl"><input type="checkbox" data-act="impl" ${d.implemented ? "checked" : ""} ${d.status === "adopted" ? "" : "disabled"}> Confirmed in place at 46'</label>
+    </div>
+    <div class="watch"><b>Watch</b> ${esc(t.text || c.watch)} <span class="src">target ${esc(t.id || "")} · ${esc(t.policy || "")}</span></div>
+    ${momentChips(f)}
+    <div class="moments reports"><b>Reports</b><a href="#preCard">Pre-match vs now</a><a href="#teamCard">Team report</a><a href="#playersCard">Player cards</a></div>
+    <div class="checkslot" data-finding="${esc(c.finding)}">${followUp(c.finding, c)}</div></div>`;
 }
 
 const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
@@ -797,35 +927,55 @@ function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
   if (d.mode === "analyst") {
-    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2>
-      <div class="checkbar"><button class="btn" id="check60">⏱ Check at 60'</button><p class="muted">Pick an option under each call, then check whether its target is being met after 15 minutes of the second half.</p></div>
-      <div class="reveal">` + d.changes.map((c, i) => {
-      const f = finds[c.finding] || {}, x = expl[c.finding] || {};
-      const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
-      return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(f.title || c.action)}</span></h3>
-        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}</div>
-        <div class="body"><p>${esc(x.why_it_matters || "")}</p>
-        <div class="chips">${evidenceChips(f)}</div>
-        <div class="options" data-finding="${esc(c.finding)}">
-          <div class="option rec${choice(c.finding) === "a" ? " chosen" : ""}" data-option="a" role="button" tabindex="0"><b>Option A</b><span class="pick">recommended</span><span class="chosen-mark">✓ chosen</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
-          <div class="option${choice(c.finding) === "b" ? " chosen" : ""}" data-option="b" role="button" tabindex="0"><b>Option B</b><span class="chosen-mark">✓ chosen</span><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
-        </div>
-        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
-        ${momentChips(f)}
-        <div class="checkslot" data-finding="${esc(c.finding)}"></div></div></div>`;
+    if (!state.first) state.first = d.changes[0].finding;
+    const order = [state.first, ...d.changes.map((c) => c.finding).filter((f) => f !== state.first)];
+    const byF = Object.fromEntries(d.changes.map((c, i) => [c.finding, { c, n: i + 1 }]));
+    const summary = order.map((f) => {
+      const { c, n } = byF[f], fd = finds[f] || {};
+      return `<li class="${f === state.first ? "first" : ""}"><span class="num">${n}</span><span class="t">${esc(fd.title || c.action)}</span>
+        <span class="st">${esc(decisionLabel(f))}</span>
+        ${f === state.first ? '<span class="pin">Discuss first</span>' : `<button class="btn small" data-first="${esc(f)}">Discuss first</button>`}</li>`;
+    }).join("");
+    $("out").innerHTML = LOADER + `<h2>Three calls · ${esc(d.focus_team)}</h2>
+      <ol class="summary">${summary}</ol>
+      <p class="muted unranked">Unranked: you pick which call to discuss first. The other calls stay below.</p>
+      <div class="checkbar"><button class="btn" id="check60">⏱ Check at 60'</button><p class="muted">Draft and adopt options, then check each Watch target on 46'–60'.</p></div>
+      <div class="reveal">` + order.map((f) => {
+      const { c, n } = byF[f], fd = finds[f] || {}, x = expl[f] || {};
+      const concept = x.concept || CONCEPTS[fd.concept] || fd.concept || "";
+      const open = f === state.first || state.open.has(f);
+      return `<div class="change${open ? " open" : ""}" data-finding="${esc(f)}"><h3><span class="num">${n}</span><span>${esc(fd.title || c.action)}</span></h3>
+        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}<span class="tag">${esc(decisionLabel(f))}</span>
+        ${f === state.first ? "" : `<button class="btn small toggle" aria-expanded="${open}">${open ? "Hide" : "Open"}</button>`}</div>
+        ${open ? callBody(c, fd, x) : ""}</div>`;
     }).join("") + "</div>";
-    $("out").querySelectorAll(".option").forEach((el) => {
+    const out = $("out");
+    out.querySelectorAll("[data-first]").forEach((b) => b.addEventListener("click", () => { state.first = b.dataset.first; renderOutput(d); }));
+    out.querySelectorAll(".toggle").forEach((b) => b.addEventListener("click", () => {
+      const f = b.closest(".change").dataset.finding;
+      state.open.has(f) ? state.open.delete(f) : state.open.add(f); renderOutput(d);
+    }));
+    out.querySelectorAll(".option").forEach((el) => {
       const pick = () => {
-        const box = el.parentElement;
-        state.choices[box.dataset.finding] = el.dataset.option;
-        box.querySelectorAll(".option").forEach((o) => o.classList.toggle("chosen", o === el));
-        clearCheck();
+        const f = el.parentElement.dataset.finding, s = dec(f);
+        if (s.draft === el.dataset.option) return;
+        // A new draft reopens the decision; the old adoption and check no longer apply.
+        Object.assign(s, { draft: el.dataset.option, status: "open", implemented: false });
+        clearCheck(); renderOutput(d);
       };
       el.addEventListener("click", pick);
       el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
     });
+    out.querySelectorAll(".decide button").forEach((b) => b.addEventListener("click", () => {
+      const s = dec(b.parentElement.dataset.finding);
+      s.status = s.status === b.dataset.act ? "open" : b.dataset.act;
+      if (s.status !== "adopted") s.implemented = false;
+      clearCheck(); renderOutput(d);
+    }));
+    out.querySelectorAll(".decide input").forEach((i) => i.addEventListener("change", () => {
+      dec(i.closest(".decide").dataset.finding).implemented = i.checked; clearCheck(); renderOutput(d);
+    }));
     $("check60").addEventListener("click", runCheck);
-    if (state.check && state.check.focus === d.focus) renderCheck(state.check);
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
     $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>

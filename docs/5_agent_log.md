@@ -1659,3 +1659,108 @@ of it is in the live app: the backend still gives v1's verdict wording,
 does not store the adopted target, has no evidence policy, and
 `threat_channels` still returns 0% for a team with no threat. Codex v1
 needs committing from Mike's checkout to sit beside the Claude versions.
+
+## 2026-10-21 · Claude · Claude v2 built into the live app
+
+**Why.** Mike picked Claude v2. I built it into the real app on this branch,
+working on Mike's Mac only. The archived prototype folders are unchanged;
+`claude-v2/` stays the reference for comparison.
+
+**Backend.**
+
+- `halftime/metrics.py`: the proposed evidence policy is one constant
+  block. The floors are `MIN_RATE_EVENTS = 10`, `MIN_SHARE_PASSES = 20`
+  threatening passes and `MIN_SHOTS = 5`. `evidence_status()` returns:
+  - met, not met or too close for rates; too close means within one
+    Poisson standard error, √n / minutes;
+  - met or not met for shares and xG;
+  - insufficient below a floor or with no value.
+
+  `threat_channels()` returns None shares for a team with no threatening
+  pass. Before, it returned 0%, which passed "below 40%" on no evidence.
+  `threat_passes()` counts the passes behind a share.
+- `halftime/agents.py`, targets: `watch_targets()` adds a target id
+  (`{finding}.{focus}.v1`) and a policy note; the 40% limit is "proposed
+  limit, not validated".
+- `halftime/agents.py`, checks: each `check_targets()` result carries:
+  - the count, unit and window (46'-60');
+  - the turning-point-to-half-time baseline and the status;
+  - the standard error for rates, the rule text and the target id;
+  - a cost guardrail for a press or threat call against the focus team.
+    The guardrail is a comparison only: focus xT per 10 minutes against
+    the turning point to half-time, plus an "enough" flag.
+
+  `on_track` is kept and now means `status == "met"`.
+- `halftime/agents.py`, verifier: it never recommends switching.
+  `next` is "keep" (only when the target is met) or "review", and
+  `check_verdicts()` enforces both rules against the checks.
+  `VERIFY_INSTRUCTIONS` says too-close and insufficient results are not
+  verdicts.
+- `halftime/agents.py`, briefing: each change gets its typed `target` and
+  a `rules` block (alternative explanation, how to tell them apart, best
+  when for each option, `source: "rules"`). Both are attached after the
+  coach step, so the model schemas are unchanged. `tactics_offline` copes
+  with no threat.
+- `app.py`: `POST /api/check` accepts an optional typed `decisions`
+  record per finding: option, status, implemented and target id. The
+  choices come from it. Three cases return 422: a target id that is not
+  the current one, implementation without adoption, and an unknown status.
+
+**Page.** `static/index.html` now has v2's analyst view, reading the API
+instead of fixtures:
+- the summary with **Discuss first**;
+- What we saw / Why / Or maybe, with the rules text labelled;
+- no option chosen in advance, and Best when for each option;
+- Adopt, Defer and Reject, plus "Confirmed in place at 46'";
+- the decision record sent with the check, and the follow-up inside the
+  call with count, status, baseline and cost check;
+- the verifier's wording under details, links to the reports, and a
+  folded pipeline on narrow screens.
+
+Changing a draft, a decision or implementation clears the check. The
+existing token and focus guards still drop stale replies.
+
+**Verified.**
+- `ruff format --check .` and `ruff check .` pass with ruff 0.16.8.
+  `python -m pytest -q` gives **65 passed**. New tests cover:
+  - evidence boundaries and None channel shares;
+  - seed-27 statuses: home press not met at 1.33 from 20; Northgate xG
+    insufficient on 2 shots; away press too close at 1.33 against
+    at least 1.48;
+  - guardrails, and the briefing target and rules text;
+  - the verifier never naming the other option or "switch", and "keep"
+    rejected for a miss;
+  - decisions accepted, plus each 422 case.
+- Offline app in the desktop browser pane, Chromium, seed 27:
+  - Adopt is disabled until an option is drafted, and labels agree after
+    draft, adopt and implement.
+  - The check request carries the decision record.
+  - Drafting B clears the check, and a check reply delayed 800 ms is
+    dropped after a draft change.
+  - Switching to Away shows no stale check; Away's press check reads
+    "Too close to call" and Home's xG check "Not enough evidence".
+  - No horizontal overflow at 1440, 1024, 900, 861, 768, 390 or 375 px.
+  - At 390 px the pipeline loads folded.
+- Live model, using `.env` (Azure OpenAI variables only; no Foundry
+  variables set), through uvicorn:
+  - Home analyst briefing: tactics, explainer and coach all
+    `OpenAIChatClient`, with no rejection notes.
+  - 60' check with all options adopted: verifier `OpenAIChatClient`,
+    accepted.
+  - Statuses: press not met, threat not met, scoreline insufficient.
+  - All three verdicts were "review". The xG wording calls 0.27
+    against 0.1 "close but … insufficient". It did not tell the coach to
+    switch, but "close" is loose wording.
+  - An earlier attempt through FastAPI's TestClient fell back on the
+    verifier with "Event loop is closed". That was the harness reusing
+    the client across loops, not a model rejection.
+
+**Not done / open.**
+- The evidence floors, the 40% limit and the cost check are proposed
+  policy, not validated.
+- The rules text is editorial.
+- Decisions are not stored server-side. The check validates the record
+  sent with it.
+- The target id encodes only finding, focus and version, so it catches
+  a focus change but not a different first half under the same seed.
+- Not merged or deployed.

@@ -527,7 +527,9 @@ def moments_for_finding(finding: dict, key_moments: list[dict]) -> list[dict]:
 def threat_channels(events: list[dict], side: str) -> dict:
     """Share of a team's xT by the channel the ball was moved into.
 
-    In the attacking frame y = 0 is the team's right touchline.
+    In the attacking frame y = 0 is the team's right touchline. A team with
+    no threatening pass has no shares (None), not 0% in every channel, so a
+    "share below N%" target cannot pass on no evidence.
     """
     totals = {"right": 0.0, "centre": 0.0, "left": 0.0}
     for e in events:
@@ -547,9 +549,65 @@ def threat_channels(events: list[dict], side: str) -> dict:
             totals[ch] += gain
     total = sum(totals.values())
     return {
-        k: round(100 * v / total, 1) if total else 0.0
+        k: round(100 * v / total, 1) if total else None
         for k, v in totals.items()
     }
+
+
+def threat_passes(events: list[dict], side: str) -> int:
+    """Completed passes by a team that moved the ball to higher xT."""
+    return sum(
+        1
+        for e in events
+        if e["team"] == side
+        and e["type"] == "pass"
+        and e["outcome"] == "complete"
+        and pass_xt(e) > 0
+    )
+
+
+# Proposed evidence policy for the second-half check (agent log, 2026-10-20).
+# These are policy defaults for discussion, not football facts: below a
+# floor the check reports "insufficient" instead of a verdict.
+MIN_RATE_EVENTS = 10  # events behind a per-minute rate
+MIN_SHARE_PASSES = 20  # threatening passes behind a share or an xT rate
+MIN_SHOTS = 5  # shots behind an xG total
+EVIDENCE_STATUSES = ("met", "not_met", "too_close", "insufficient")
+
+
+def rate_se(n: int, minutes: float) -> float:
+    """Rough standard error of a per-minute rate from a count (Poisson)."""
+    return n**0.5 / minutes if minutes else 0.0
+
+
+def evidence_status(
+    value: float | None,
+    target: float,
+    direction: str,
+    n: int,
+    minimum: int,
+    se: float | None = None,
+) -> str:
+    """Judge a measured value against its target under the evidence policy.
+
+    Args:
+        value: The measured value, or None when nothing could be measured.
+        target: The threshold.
+        direction: "below" or "at_least".
+        n: How many events the value rests on.
+        minimum: The policy floor for `n`.
+        se: For rates, a standard error; within one of the target the result
+            is "too_close". Shares and xG pass None and get no such band.
+
+    Returns:
+        One of `EVIDENCE_STATUSES`.
+    """
+    if value is None or n < minimum:
+        return "insufficient"
+    if se is not None and abs(value - target) < se:
+        return "too_close"
+    met = value < target if direction == "below" else value >= target
+    return "met" if met else "not_met"
 
 
 def shot_map(events: list[dict]) -> list[dict]:

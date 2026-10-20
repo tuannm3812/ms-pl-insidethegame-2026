@@ -312,24 +312,24 @@ def test_second_half_check_offline(match, focus):
         "scoreline",
     ]
     for c in out["checks"]:
-        assert c["minutes"] == 15
-        expected = (
-            c["value"] < c["target"]
-            if c["direction"] == "below"
-            else c["value"] >= c["target"]
-        )
-        assert c["on_track"] is expected
+        assert c["minutes"] == 15 and c["window"] == "46'-60'"
+        assert c["status"] in metrics.EVIDENCE_STATUSES
+        assert c["on_track"] is (c["status"] == "met")
+        assert c["target_id"] == f"{c['finding']}.{focus}.v1"
     assert out["choices"] == {"press": "a", "threat": "b", "scoreline": "a"}
     by_id = {v["finding"]: v for v in out["verdicts"]}
+    changes = {c["finding"]: c for c in briefing["changes"]}
     for c in out["checks"]:
         v = by_id[c["finding"]]
-        assert v["next"] == ("keep" if c["on_track"] else "change")
-        assert str(c["value"]) in v["verdict"]
-    threat = briefing["changes"][1]
-    assert (
-        threat["alternative"] in by_id["threat"]["verdict"]
-        or threat["action"] in by_id["threat"]["verdict"]
-    )
+        assert v["next"] == ("keep" if c["status"] == "met" else "review")
+        assert str(c["n"]) in v["verdict"]
+        # The verifier never points the coach at the other option.
+        other = changes[c["finding"]][
+            "action" if c["finding"] == "threat" else "alternative"
+        ]
+        assert other not in v["verdict"]
+        assert "switch" not in v["verdict"].lower()
+        assert "consider option" not in v["verdict"].lower()
     assert [t["agent"] for t in out["trace"]] == ["stats", "verifier"]
     with pytest.raises(ValueError, match="a or b"):
         asyncio.run(
@@ -345,12 +345,23 @@ def test_second_half_check_offline(match, focus):
 def test_verifier_model_reply_is_checked_and_grounded(match):
     briefing = asyncio.run(half_time_briefing(match))
     good = [
-        {"finding": f, "verdict": "Keep going.", "next": "keep"}
+        {
+            "finding": f,
+            "verdict": "Look again with the staff.",
+            "next": "review",
+        }
         for f in ("press", "threat", "scoreline")
     ]
     assert check_verdicts(good) == good
-    with pytest.raises(ValueError, match="keep or change"):
-        check_verdicts([dict(v, next="maybe") for v in good])
+    with pytest.raises(ValueError, match="keep or review"):
+        check_verdicts([dict(v, next="change") for v in good])
+    # "keep" is only allowed for a target that is met.
+    missed = [
+        {"finding": f, "status": "not_met"}
+        for f in ("press", "threat", "scoreline")
+    ]
+    with pytest.raises(ValueError, match="keep only when"):
+        check_verdicts([dict(v, next="keep") for v in good], missed)
     invented = [dict(v, verdict="We lost it 77 times.") for v in good]
     client = ScriptedClient([json.dumps(invented)])
     out = asyncio.run(
@@ -770,3 +781,122 @@ def test_clips_belong_to_their_finding(seed):
                     assert c["team"] == f["team"]
                 if f["id"] == "scoreline":
                     assert c["kind"] in ("goal", "big_chance_missed")
+
+
+def test_evidence_status_boundaries():
+    floor = metrics.MIN_RATE_EVENTS
+    status = metrics.evidence_status
+    assert status(1.0, 2.0, "below", floor - 1, floor) == "insufficient"
+    assert status(None, 2.0, "below", 50, floor) == "insufficient"
+    assert status(1.0, 2.0, "below", floor, floor) == "met"
+    assert status(2.0, 2.0, "below", floor, floor) == "not_met"
+    assert status(2.0, 2.0, "at_least", floor, floor) == "met"
+    # Within one standard error of the target is too close to call.
+    assert status(1.9, 2.0, "below", floor, floor, se=0.2) == "too_close"
+    assert status(1.7, 2.0, "below", floor, floor, se=0.2) == "met"
+    assert status(2.3, 2.0, "below", floor, floor, se=0.2) == "not_met"
+    assert metrics.rate_se(20, 15) == pytest.approx(20**0.5 / 15)
+
+
+def test_threat_channels_without_threat_is_none(match):
+    assert metrics.threat_channels([], "home") == {
+        "left": None,
+        "centre": None,
+        "right": None,
+    }
+    assert metrics.threat_passes([], "home") == 0
+    # No evidence can never pass a "share below 40%" target.
+    assert (
+        metrics.evidence_status(None, 40, "below", 0, metrics.MIN_SHARE_PASSES)
+        == "insufficient"
+    )
+    findings, _, _ = _rules(match)
+    findings[1]["evidence"][0]["value"] = {
+        "left": None,
+        "centre": None,
+        "right": None,
+    }
+    assert check_findings(findings) == findings
+
+
+def _check(match, focus, **kwargs):
+    briefing = asyncio.run(half_time_briefing(match, focus=focus))
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            focus=focus,
+            **kwargs,
+        )
+    )
+    return briefing, {c["finding"]: c for c in out["checks"]}, out
+
+
+def test_seed_27_check_statuses(match):
+    _, home, _ = _check(match, "home")
+    # 20 own-half losses in 15 minutes: 1.33 against under 0.84, clear miss.
+    assert (home["press"]["n"], home["press"]["value"]) == (20, 1.33)
+    assert home["press"]["status"] == "not_met"
+    assert home["press"]["baseline"] == 1.48
+    # Two Northgate shots cannot judge an xG target either way.
+    assert home["scoreline"]["n"] == 2
+    assert home["scoreline"]["status"] == "insufficient"
+    assert home["threat"]["policy"] == "proposed limit, not validated"
+    # Calls against the focus team carry a cost check, not a verdict.
+    guard = home["press"]["guardrail"]
+    assert guard and "status" not in guard and guard["enough"]
+    assert home["scoreline"]["guardrail"] is None
+    _, away, _ = _check(match, "away")
+    # The same 1.33 against "at least 1.48" sits inside one standard error.
+    assert away["press"]["value"] == 1.33 and away["press"]["target"] == 1.48
+    assert away["press"]["status"] == "too_close"
+
+
+def test_briefing_changes_carry_target_and_rules_text(match):
+    out = asyncio.run(half_time_briefing(match, focus="away"))
+    for c in out["changes"]:
+        assert c["target"]["id"] == f"{c['finding']}.away.v1"
+        assert c["target"]["text"] == c["watch"]
+        assert c["rules"]["source"] == "rules"
+        assert set(c["rules"]["best_when"]) == {"a", "b"}
+        assert c["rules"]["alternative"] and c["rules"]["tell_apart"]
+
+
+def test_check_decisions(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "client", None)
+    c = TestClient(app_module.app)
+    b = c.get("/api/briefing", params={"focus": "home"}).json()
+    body = {
+        "focus": "home",
+        "findings": b["findings"],
+        "changes": b["changes"],
+    }
+    decisions = {
+        "press": {
+            "option": "b",
+            "status": "adopted",
+            "implemented": True,
+            "target_id": "press.home.v1",
+        },
+        "threat": {"option": None, "status": "deferred"},
+    }
+    r = c.post("/api/check", json=body | {"decisions": decisions})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["choices"] == {"press": "b", "threat": "a", "scoreline": "a"}
+    assert out["decisions"]["press"]["implemented"] is True
+    assert out["decisions"]["threat"]["target_id"] == "threat.home.v1"
+    # A target adopted for another focus is not the one this check measures.
+    stale = {"press": dict(decisions["press"], target_id="press.away.v1")}
+    r = c.post("/api/check", json=body | {"decisions": stale})
+    assert r.status_code == 422 and "reload" in r.json()["detail"]
+    unadopted = {"press": {"option": "a", "implemented": True}}
+    r = c.post("/api/check", json=body | {"decisions": unadopted})
+    assert r.status_code == 422
+    r = c.post(
+        "/api/check", json=body | {"decisions": {"press": {"status": "done"}}}
+    )
+    assert r.status_code == 422

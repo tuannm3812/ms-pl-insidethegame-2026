@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -94,13 +95,34 @@ async def briefing(
     )
 
 
+class Decision(BaseModel):
+    """The analyst's record for one call.
+
+    The drafted option, the decision, and whether the change was confirmed
+    in place at the restart.
+    """
+
+    option: Literal["a", "b"] | None = None
+    status: Literal["open", "adopted", "deferred", "rejected"] = "open"
+    implemented: bool = False
+    target_id: str | None = None
+
+
 class CheckRequest(BaseModel):
-    """The half-time calls to check, plus which option the coach chose."""
+    """The half-time calls to check, plus which option the coach chose.
+
+    `decisions` supersedes `choices` where it names an option; each adopted
+    `target_id` must match the target the check measures, or the request is
+    rejected with 422.
+    """
 
     seed: int = DEFAULT_SEED
     focus: str = Field("home", pattern="^(home|away)$")
     until: int = Field(CHECK_MINUTE, ge=46, le=90)
     choices: dict[str, str] = Field(default_factory=dict)
+    decisions: (
+        dict[Literal["press", "threat", "scoreline"], Decision] | None
+    ) = None
     findings: list[dict]
     changes: list[dict]
 
@@ -117,6 +139,11 @@ async def check(req: CheckRequest) -> dict:
             changes=changes,
             focus=req.focus,
             choices=req.choices,
+            decisions=(
+                {f: d.model_dump() for f, d in req.decisions.items()}
+                if req.decisions
+                else None
+            ),
             until=req.until,
             client=client,
         )
