@@ -1,0 +1,949 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Half-time Briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3f8; --surface-1: #ffffff; --surface-2: #efedf5; --border: #e1dfea;
+    --text-primary: #1a0f24; --text-secondary: #4c4459; --text-muted: #7b7488;
+    --home: #0098b8; --away: #d81b65; --accent: #4b0f6b; --accent-text: #ffffff; --hi: #00c27a; --hi-text: #06210f;
+    --pitch: #e8f4ec; --pitch-line: #b5d3c0;
+    --model: #7c3aed; --model-bg: #f0e9fe; --rules: #4c4459; --rules-bg: #eeecf2;
+    --data: #087f6a; --data-bg: #e2f4ef; --warn: #b45309; --warn-bg: #fdf0df;
+    --bug: linear-gradient(90deg, #2b0033, #3d0a52); --bug-text: #ffffff; --live: #ff2d55;
+    --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #0f0a17; --surface-1: #181122; --surface-2: #221a2e; --border: #33293f;
+      --text-primary: #f3f0f8; --text-secondary: #c9c2d6; --text-muted: #8f879e;
+      --home: #22c3e6; --away: #ff4f93; --accent: #7c4dff; --accent-text: #ffffff; --hi: #00e58b; --hi-text: #06210f;
+      --pitch: #14231b; --pitch-line: #2f4a3a;
+      --model: #b18cff; --model-bg: #2a1d45; --rules: #c9c2d6; --rules-bg: #282131;
+      --data: #3fd0b0; --data-bg: #12302a; --warn: #f5a524; --warn-bg: #3a2810;
+      --bug: linear-gradient(90deg, #22002a, #3d0a52); --bug-text: #ffffff; --live: #ff2d55;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #0f0a17; --surface-1: #181122; --surface-2: #221a2e; --border: #33293f;
+    --text-primary: #f3f0f8; --text-secondary: #c9c2d6; --text-muted: #8f879e;
+    --home: #22c3e6; --away: #ff4f93; --accent: #7c4dff; --accent-text: #ffffff; --hi: #00e58b; --hi-text: #06210f;
+    --pitch: #14231b; --pitch-line: #2f4a3a;
+    --model: #b18cff; --model-bg: #2a1d45; --rules: #c9c2d6; --rules-bg: #282131;
+    --data: #3fd0b0; --data-bg: #12302a; --warn: #f5a524; --warn-bg: #3a2810;
+    --bug: linear-gradient(90deg, #22002a, #3d0a52); --bug-text: #ffffff; --live: #ff2d55;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 15.5px/1.5 var(--font-body); }
+  h1, h2, h3, h4, .scorebug, .tv, .num, .node .name, .bars .v, .kind, .concept, .watch b, .tag { font-family: var(--font-display); }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+  button, select { font: inherit; }
+  button:disabled, select:disabled { opacity: .55; cursor: progress; }
+
+  /* Header and broadcast-style scorebug */
+  header { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; }
+  .brand h1 { font-size: 30px; font-weight: 800; margin: 0; letter-spacing: .01em; text-transform: uppercase; line-height: 1; }
+  .brand h1 em { font-style: normal; color: var(--hi); }
+  .brand p { margin: 6px 0 0; font-size: 14px; color: var(--text-muted); }
+  .badge { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 5px 11px;
+           border-radius: 999px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rules); }
+  .badge.live .dot { background: var(--model); box-shadow: 0 0 0 3px var(--model-bg); }
+  .scorebug { display: flex; align-items: stretch; margin-top: 18px; border-radius: 10px; overflow: hidden;
+              background: var(--bug); color: var(--bug-text); width: fit-content; max-width: 100%;
+              box-shadow: 0 8px 24px rgba(43,0,51,.22); font-weight: 700; }
+  .scorebug .team { display: flex; align-items: center; gap: 10px; padding: 10px 18px; font-size: 22px;
+                    text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+  .scorebug .team::before { content: ""; width: 6px; align-self: stretch; border-radius: 3px; background: var(--c); }
+  .scorebug .team.away { flex-direction: row-reverse; }
+  .scorebug .score { display: grid; place-items: center; padding: 0 20px; font-size: 32px; background: rgba(255,255,255,.1);
+                     font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scorebug .clock { display: grid; place-items: center; padding: 0 14px; font-size: 18px; background: var(--hi); color: var(--hi-text);
+                     font-variant-numeric: tabular-nums; min-width: 56px; }
+  .scorebug .clock.live { background: var(--live); color: #fff; }
+  .scorebug.flash .score { animation: flash 1.2s ease; }
+  @keyframes flash { 0%, 100% { background: rgba(255,255,255,.1); } 30% { background: var(--hi); color: var(--hi-text); } }
+  @media (max-width: 600px) {
+    .scorebug { width: 100%; }
+    .scorebug .team { font-size: 15px; padding: 8px; gap: 6px; letter-spacing: 0; flex: 1 1 0; min-width: 0; }
+    .scorebug .team .nm { overflow: hidden; text-overflow: ellipsis; }
+    .scorebug .score { font-size: 22px; padding: 0 10px; }
+    .scorebug .clock { min-width: 44px; padding: 0 8px; font-size: 14px; }
+  }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 7px 14px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  select, .btn { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+                 background: var(--surface-1); color: var(--text-primary); }
+  .btn { cursor: pointer; }
+  #replay { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 17px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-primary); margin: 0 0 10px; font-weight: 700;
+            display: flex; align-items: center; gap: 8px; }
+  .card h2::before { content: ""; width: 4px; height: 15px; border-radius: 2px; background: var(--hi); }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; margin-top: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .stack { display: grid; gap: 16px; align-content: start; }
+  svg { display: block; width: 100%; height: auto; }
+  svg text { fill: var(--text-secondary); font-size: 11px; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-top: 6px; flex-wrap: wrap; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+
+  /* Agent pipeline: the multi-agent story, kept on screen */
+  .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px; position: relative; }
+  .node { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+          background: var(--surface-1); transition: border-color .3s, background .3s, transform .3s; }
+  .node:not(:last-child)::after { content: "→"; position: absolute; right: -18px; top: 50%; transform: translateY(-50%);
+                                   color: var(--text-muted); font-size: 15px; }
+  .node .name { font-weight: 700; font-size: 19px; text-transform: uppercase; letter-spacing: .02em; text-transform: capitalize; display: flex; align-items: center; gap: 6px; }
+  .node .role { font-size: 12px; color: var(--text-muted); line-height: 1.35; margin-top: 1px; min-height: 2.7em; }
+  .node .status { margin-top: 8px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center;
+                  font-variant-numeric: tabular-nums; color: var(--text-secondary); min-height: 22px; }
+  .kind { font-size: 12.5px; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; letter-spacing: .02em; white-space: nowrap; }
+  .kind.data { color: var(--data); background: var(--data-bg); }
+  .kind.model { color: var(--model); background: var(--model-bg); }
+  .kind.rules { color: var(--rules); background: var(--rules-bg); }
+  .kind.fallback { color: var(--warn); background: var(--warn-bg); }
+  .node.k-model { border-color: var(--model); }
+  .node.k-fallback { border-color: var(--warn); }
+  .node .note { flex-basis: 100%; color: var(--text-muted); font-size: 11.5px; line-height: 1.35; }
+  .node.working { border-style: dashed; }
+  .node.working .status::before { content: ""; width: 10px; height: 10px; border-radius: 50%;
+                                   border: 2px solid var(--text-muted); border-top-color: transparent; animation: spin .8s linear infinite; }
+  .node.done { animation: pop .35s ease; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pop { 0% { transform: scale(.97); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
+  .pipe-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 12px; color: var(--text-muted); align-items: center; }
+  @media (max-width: 860px) {
+    .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .node:not(:last-child)::after { display: none; }
+  }
+
+  /* Briefing output */
+  #out { position: relative; min-height: 220px; }
+  #out.loading > *:not(.loader) { opacity: .3; transition: opacity .2s; }
+  .loader { position: absolute; inset: 0; display: none; place-items: center; text-align: center; z-index: 2; }
+  #out.loading .loader { display: grid; }
+  .loader b { display: block; font-size: 16px; }
+  .loader span { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .change { border-top: 1px solid var(--border); padding: 14px 0 4px; }
+  .change:first-of-type { border-top: 0; padding-top: 0; }
+  .change .num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+                 background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 800; margin-right: 10px; flex: none; }
+  .change h3 { font-size: 20px; font-weight: 700; margin: 0 0 6px; display: flex; align-items: flex-start; line-height: 1.4; }
+  .change p { margin: 6px 0; color: var(--text-secondary); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: 36px; }
+  .tag { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  .concept { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px;
+             border-radius: 999px; background: var(--accent); color: var(--accent-text); }
+  .change .body { margin-left: 36px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary);
+          font-variant-numeric: tabular-nums; }
+  .chip b { color: var(--text-primary); font-weight: 650; }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+  .option { padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid transparent; font-size: 13px; }
+  .option.rec { border-color: var(--accent); }
+  .option > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
+  .option .pick { margin-left: 6px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+  .option { cursor: pointer; }
+  .option.chosen { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .option.chosen > b, .option.chosen .pick, .option.chosen p, .option.chosen .cost { color: var(--accent-text); }
+  .option .chosen-mark { display: none; margin-left: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .option.chosen .chosen-mark { display: inline; }
+  .option p { margin: 4px 0 0; }
+  .checkbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 10px; }
+  .checkbar .muted { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  #check60 { background: var(--hi); color: var(--hi-text); border-color: var(--hi); font-weight: 600; }
+  .check { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; border-inline-start: 4px solid var(--border); }
+  .check.ok { border-inline-start-color: var(--hi); }
+  .check.no { border-inline-start-color: var(--away); }
+  .check b.badge { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em; font-size: 12px; margin-right: 6px; }
+  .check.ok b.badge { color: var(--hi); }
+  .check.no b.badge { color: var(--away); }
+  .check p { margin: 4px 0 0; color: var(--text-primary); }
+  .check .meta { color: var(--text-secondary); }
+  .option .cost { color: var(--text-secondary); }
+  .option .cost b { font-weight: 700; margin-right: 4px; }
+  @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  .moments { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .moments > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; font-family: var(--font-display); }
+  .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
+  .watch b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; margin-right: 4px; }
+  .fan h3 { font-size: 32px; font-weight: 800; margin: 0 0 10px; line-height: 1.25; }
+  .fan p { margin: 8px 0; }
+  .spot { margin: 12px 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border);
+          border-inline-start: 4px solid var(--hi); }
+  .reveal > * { animation: rise .45s ease both; }
+  .reveal > *:nth-child(2) { animation-delay: .08s; } .reveal > *:nth-child(3) { animation-delay: .16s; }
+  .reveal > *:nth-child(4) { animation-delay: .24s; } .reveal > *:nth-child(5) { animation-delay: .32s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* Broadcast overlay preview */
+  .tv { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; color: #fff;
+        background: radial-gradient(ellipse at 50% 120%, #3f8f4e 0%, #2b6b38 45%, #1c4626 100%); }
+  .tv::before { content: ""; position: absolute; inset: 8% 6%; border: 2px solid rgba(255,255,255,.22); border-radius: 4px; }
+  .tv::after { content: ""; position: absolute; left: 50%; top: 8%; bottom: 8%; border-left: 2px solid rgba(255,255,255,.22); }
+  .tv .gfx { position: absolute; z-index: 1; animation: rise .4s ease both; }
+  .tv .mini-bug { left: 4%; top: 6%; display: flex; font-size: clamp(9px, 1.6vw, 13px); font-weight: 650; border-radius: 6px;
+                  overflow: hidden; background: rgba(43,0,51,.9); text-transform: uppercase; }
+  .tv .mini-bug span { padding: 4px 8px; white-space: nowrap; }
+  .tv .mini-bug .s { background: rgba(255,255,255,.12); font-variant-numeric: tabular-nums; }
+  .tv .mini-bug .ht { background: var(--hi); color: var(--hi-text); }
+  .tv .panel { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 70%; padding: 3% 4%;
+               background: rgba(43,0,51,.9); border-radius: 8px; font-size: clamp(9px, 1.5vw, 13px); }
+  .tv .panel h4 { margin: 0 0 6px; font-size: 1.15em; text-transform: uppercase; letter-spacing: .05em; }
+  .tv .prow { display: grid; grid-template-columns: 3.4em 1fr 3.4em; gap: 6px; align-items: center; margin: 3px 0;
+              font-variant-numeric: tabular-nums; }
+  .tv .prow .lab { grid-column: 1 / -1; opacity: .7; font-size: .85em; margin-bottom: -3px; }
+  .tv .prow .bar { display: flex; height: 6px; gap: 2px; } .tv .prow .bar i { border-radius: 3px; }
+  .tv .prow .r { text-align: right; }
+  .tv .lower { left: 4%; right: 4%; bottom: 7%; display: flex; align-items: stretch; border-radius: 6px; overflow: hidden;
+               font-size: clamp(10px, 1.7vw, 15px); background: rgba(43,0,51,.92); }
+  .tv .lower .k { padding: 6px 10px; background: var(--hi); color: var(--hi-text); font-weight: 700; text-transform: uppercase; font-size: .8em;
+                  letter-spacing: .05em; display: grid; place-items: center; white-space: nowrap; }
+  .tv .lower .t { padding: 6px 12px; font-weight: 600; }
+  .tv-bar { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .tv-dots { display: flex; gap: 4px; flex: 1; min-width: 160px; }
+  .tv-dots button { flex: 1; height: 6px; padding: 0; border: 0; border-radius: 3px; background: var(--border); cursor: pointer; }
+  .tv-dots button.on { background: var(--hi); }
+
+  .feed { height: 150px; overflow: auto; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .feed div { padding: 2px 0; animation: rise .3s ease both; }
+  .feed .big { color: var(--text-primary); font-weight: 650; }
+  details summary { cursor: pointer; color: var(--text-secondary); }
+  details + details { margin-top: 6px; }
+  pre { font-size: 12px; overflow: auto; max-height: 340px; background: var(--surface-0); padding: 10px; border-radius: 8px; }
+  .bars .row { display: grid; grid-template-columns: 48px 1fr 48px; gap: 8px; align-items: center; margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .bars .label { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted); margin-bottom: -4px; }
+  .bars .track { display: flex; gap: 2px; height: 8px; }
+  .bars .track span { border-radius: 4px; transition: flex .5s ease; }
+  .bars .v { font-size: 18px; font-weight: 700; }
+  .bars .v.r { text-align: right; }
+  #tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
+         border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none;
+         box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 10; max-width: 240px; }
+  /* Two tables side by side only when the card itself has room, not the viewport. */
+  .teamgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+  .teamgrid > * { min-width: 0; overflow-x: auto; }
+  .teamgrid h3 { font-size: 15px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+  table.report { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.report td, table.report th { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+  table.report th { font-weight: 600; color: var(--text-secondary); font-size: 12px; }
+  table.report th:first-child, table.report td:first-child { text-align: left; }
+  table.report .up { color: var(--hi); font-weight: 700; }
+  table.report .down { color: var(--away); font-weight: 700; }
+  table.report td:last-child { white-space: nowrap; }
+  table.report .unit { color: var(--text-secondary); font-size: 11px; }
+  .teamnote { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
+  .pre-outlook { font-size: 14px; margin: 0 0 4px; }
+  .pre-scout { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
+  .prerow { display: grid; grid-template-columns: minmax(120px, 1.1fr) 2fr minmax(90px, auto); gap: 10px; align-items: center;
+            padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .prerow .who { font-size: 11px; color: var(--text-secondary); display: block; }
+  .prerow .val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .prerow .val b.good { color: var(--hi); }
+  .prerow .val b.bad { color: var(--away); }
+  .prerow .range { position: relative; height: 22px; }
+  .prerow .band { position: absolute; top: 7px; height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); box-sizing: border-box; }
+  .prerow .tick { position: absolute; top: 3px; width: 2px; height: 16px; margin-left: -1px; background: var(--text-secondary); }
+  .prerow .dot { position: absolute; top: 5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
+  .pre details summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+  .squad { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .squad button { font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border);
+                  background: var(--surface-1); color: var(--text-secondary); cursor: pointer; }
+  .squad button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .squad button .pos { opacity: .7; margin-left: 4px; font-size: 11px; }
+  .pcard { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pcard svg { width: 100%; height: auto; display: block; }
+  .pcard h3 { margin: 0 0 4px; font-size: 18px; }
+  .pcard .insight { font-size: 14px; color: var(--text-primary); margin: 6px 0 10px; }
+  .pcard .depth { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0 2px; background: var(--surface-2); }
+  .pcard .depth span { display: block; }
+  .pcard .depthlab { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+  .pcard .pnote { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+  @media (max-width: 760px) { .pcard { grid-template-columns: 1fr; } }
+  table.data { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.data td, table.data th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  .err { color: var(--warn); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <h1>Half-time <em>Briefing</em></h1>
+      <p>Five agents turn a synthetic match into a half-time briefing for analysts or fans.</p>
+    </div>
+    <span class="badge" id="backend"><span class="dot"></span><span>Checking agents…</span></span>
+  </header>
+  <div class="scorebug" id="scorebug" aria-live="polite">
+    <span class="team home" style="--c:var(--home)">Loading…</span>
+  </div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Mode">
+      <button data-mode="analyst" aria-pressed="true">Analyst</button>
+      <button data-mode="fan" aria-pressed="false">Fan</button>
+    </div>
+    <label class="muted">Team <select id="focus"></select></label>
+    <label class="muted" id="playerWrap" hidden>Favourite player <select id="player"></select></label>
+    <label class="muted" id="langWrap" hidden>Language
+      <select id="lang"><option value="en">English</option><option value="es">Español</option>
+        <option value="vi">Tiếng Việt</option><option value="fr">Français</option><option value="ar">العربية</option></select>
+    </label>
+    <button class="btn" id="replay">▶ Replay first half live</button>
+  </div>
+
+  <section class="card" aria-labelledby="pipeHead">
+    <div class="card-head">
+      <h2 id="pipeHead">The agent pipeline</h2>
+      <span class="muted" id="pipeTotal"></span>
+    </div>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="pipe-foot">
+      <span><span class="kind data">code</span> computes every number</span>
+      <span><span class="kind model">model</span> explains and decides</span>
+      <span><span class="kind rules">rules</span> same output with no model</span>
+      <span><span class="kind fallback">fallback</span> model reply rejected, rules used</span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div class="stack">
+      <section class="card">
+        <h2>Who had the upper hand</h2>
+        <svg id="momentum" viewBox="0 0 520 190" role="img" aria-label="Momentum by five-minute window"></svg>
+        <div class="legend" id="legend"></div>
+        <p class="muted" style="margin:6px 0 0">Share of threat (xT + xG) in each 5-minute spell. Up is the home side, down the away side.</p>
+      </section>
+      <section class="card">
+        <h2>Shots</h2>
+        <svg id="pitch" viewBox="0 0 525 340" role="img" aria-label="Shot map"></svg>
+        <p class="muted" style="margin:6px 0 0">Circle size is chance quality (xG). Filled circles are goals. Home attacks right.</p>
+      </section>
+      <section class="card">
+        <h2>First half in numbers</h2>
+        <div class="bars" id="bars"></div>
+      </section>
+    </div>
+    <div class="stack">
+      <section class="card" id="out" aria-live="polite">
+        <div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>
+      </section>
+      <section class="card" id="preCard" hidden>
+        <h2>Pre-match vs now</h2>
+        <div id="pre"></div>
+      </section>
+      <section class="card" id="teamCard" hidden>
+        <h2 id="teamHead">Team report</h2>
+        <div class="teamgrid" id="team"></div>
+      </section>
+      <section class="card" id="playersCard" hidden>
+        <h2 id="playersHead">Players</h2>
+        <div class="squad" id="squad" role="tablist" aria-label="Choose a player"></div>
+        <div class="pcard" id="pcard"></div>
+      </section>
+      <section class="card" id="liveCard" hidden>
+        <h2>Live event feed</h2>
+        <div class="feed" id="feed"></div>
+      </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Broadcast overlays</h2>
+          <span class="muted" id="tvMeta"></span>
+        </div>
+        <div class="tv" id="tv" role="img" aria-label="Preview of the broadcast overlay cards"></div>
+        <div class="tv-bar">
+          <button class="btn" id="tvPlay" disabled>▶ Play</button>
+          <div class="tv-dots" id="tvDots"></div>
+        </div>
+      </section>
+      <section class="card">
+        <details><summary>Overlay cards as timed JSON</summary><pre id="overlay"></pre></details>
+        <details><summary>Timeline as a table</summary><div id="table"></div></details>
+      </section>
+    </div>
+  </div>
+</main>
+<div id="tip"></div>
+<script src="fixtures.js"></script>
+<script src="offline.js"></script>
+<script>
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tip = $("tip");
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 12, innerWidth - 250) + "px"; tip.style.top = (e.clientY + 12) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) { const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]); parent && parent.appendChild(n); return n; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// What each agent does, in the order the pipeline runs them.
+const ROLES = {
+  stats: "Reads every event and computes the numbers",
+  tactics: "Finds what changed and when",
+  explainer: "Explains why each finding matters",
+  coach: "Offers two options per finding, with trade-offs",
+  fan: "Writes the story for one supporter",
+  overlay: "Builds timed broadcast graphics",
+};
+const plan = () => ["stats", "tactics", "explainer", state.mode === "analyst" ? "coach" : "fan", "overlay"];
+
+function kindOf(t) {
+  if (t.backend === "deterministic") return ["data", "code"];
+  if (t.backend === "offline-rules") return /failed/.test(t.note) ? ["fallback", "fallback"] : ["rules", "rules"];
+  return ["model", "model"];
+}
+
+// Draw the five steps; the first `upto` show their trace, the rest wait.
+function drawPipeline(trace, upto = Infinity, idle = "Waiting") {
+  const byAgent = Object.fromEntries((trace || []).map((t) => [t.agent, t]));
+  $("pipeline").innerHTML = plan().map((a, i) => {
+    const t = i < upto ? byAgent[a] : null;
+    let status = trace ? idle : "Running", cls = trace ? "" : "working";
+    if (t) {
+      const [k, label] = kindOf(t);
+      cls = "k-" + k;
+      const note = k === "fallback" ? "Model reply rejected, used rules" : t.note;
+      status = `<span class="kind ${k}">${label}</span><span>${t.ms} ms</span>` +
+        (k === "model" ? `<span class="muted">${esc(t.backend)}</span>` : "") +
+        (note ? `<span class="note" title="${esc(t.note)}">${esc(note)}</span>` : "");
+    }
+    return `<div class="node ${cls}"><div class="name">${esc(a)}</div>
+      <div class="role">${esc(ROLES[a] || "")}</div><div class="status">${status}</div></div>`;
+  }).join("");
+}
+
+// Reveal the finished steps one after another, so the hand-offs read on screen.
+async function revealPipeline(trace, token) {
+  for (let i = 0; i < plan().length; i++) {
+    if (token !== state.req) return;
+    drawPipeline(trace, i + 1);
+    $("pipeline").children[i].classList.add("done");
+    await sleep(160);
+  }
+  const total = trace.reduce((s, t) => s + t.ms, 0);
+  const models = trace.filter((t) => kindOf(t)[0] === "model").length;
+  $("pipeTotal").textContent = `${trace.length} agents · ${total < 1000 ? total + " ms" : (total / 1000).toFixed(1) + " s"}` +
+    (models ? ` · ${models} used the model` : " · no model calls");
+}
+
+const LOADER = `<div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>`;
+
+function setBusy(busy) {
+  document.querySelectorAll(".controls button, .controls select").forEach((x) => {
+    if (x.id !== "replay" || !state.replaying) x.disabled = busy;
+  });
+  $("out").classList.toggle("loading", busy);
+}
+
+// A check belongs to one briefing and one set of choices; bumping checkReq
+// drops any check result still in flight for the old ones.
+function clearCheck() {
+  state.check = null; state.checkReq++;
+  $("out").querySelectorAll(".checkslot").forEach((slot) => (slot.innerHTML = ""));
+}
+
+async function load() {
+  const token = ++state.req;
+  state.choices = {}; clearCheck();
+  setBusy(true);
+  drawPipeline(null);
+  $("pipeTotal").textContent = "";
+  // A failed request replaces the output, so put the loader back if it is gone.
+  if (!$("elapsed")) $("out").insertAdjacentHTML("afterbegin", LOADER);
+  $("out").querySelector(".err")?.remove();
+  const started = performance.now();
+  const timer = setInterval(() => {
+    const clock = $("elapsed");
+    if (clock) clock.textContent = ((performance.now() - started) / 1000).toFixed(1) + " s";
+  }, 100);
+  try {
+    state.meta = state.meta || await (await fetch("api/match")).json();
+    const h = await (await fetch("api/health")).json();
+    const live = h.backend !== "offline-rules";
+    $("backend").classList.toggle("live", live);
+    $("backend").lastElementChild.textContent = live ? "Model connected: " + h.backend : "Rule-based agents (no model connected)";
+    const m = state.meta;
+    if (!$("focus").options.length) {
+      for (const s of ["home", "away"]) $("focus").add(new Option(m.teams[s].name, s));
+    }
+    fillPlayers();
+    const q = new URLSearchParams({ mode: state.mode, focus: state.focus, language: state.lang });
+    if (state.player) q.set("player", state.player);
+    const res = await fetch("api/briefing?" + q);
+    if (!res.ok) throw new Error("briefing request failed (" + res.status + ")");
+    const data = await res.json();
+    if (token !== state.req) return;
+    state.data = data;
+    clearInterval(timer);
+    setBusy(false);
+    render();
+    revealPipeline(data.trace, token);
+  } catch (err) {
+    if (token !== state.req) return;
+    setBusy(false);
+    $("out").innerHTML = LOADER + `<p class="err">Could not build the briefing: ${esc(err.message)}. Try again.</p>`;
+    drawPipeline([], 0, "Not run");
+    $("pipeTotal").textContent = "Briefing failed";
+    $("tvPlay").disabled = !state.data;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+function fillPlayers() {
+  const sel = $("player"), squad = state.meta.teams[state.focus].players;
+  const keep = squad.some((p) => p.name === state.player) ? state.player : squad[9].name;
+  sel.innerHTML = ""; squad.forEach((p) => sel.add(new Option(`${p.name} (${p.position})`, p.name)));
+  sel.value = keep; state.player = state.mode === "fan" ? keep : "";
+}
+
+function drawScorebug(score, clock, live) {
+  const d = state.data;
+  $("scorebug").innerHTML = `<span class="team home" style="--c:var(--home)"><span class="nm">${esc(d.teams.home)}</span></span>
+    <span class="score">${score.home} – ${score.away}</span>
+    <span class="team away" style="--c:var(--away)"><span class="nm">${esc(d.teams.away)}</span></span>
+    <span class="clock${live ? " live" : ""}">${esc(clock)}</span>`;
+}
+
+function render() {
+  const d = state.data;
+  stopTv();
+  drawScorebug(d.score, "HT", false);
+  $("legend").innerHTML = `<span><span class="swatch" style="background:var(--home)"></span>${esc(d.teams.home)}</span>
+    <span><span class="swatch" style="background:var(--away)"></span>${esc(d.teams.away)}</span>`;
+  drawMomentum(d.timeline, d.turning_point_minute);
+  drawPitch(d.shots, d.teams);
+  drawBars(d.summary);
+  renderOutput(d);
+  renderPrematch(d);
+  renderTeam(d);
+  renderPlayers(d);
+  renderTv(d.overlays, 0);
+  $("tvPlay").disabled = false;
+  $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
+  $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
+    d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+}
+
+// Pre-match vs now: each metric's typical range from simulations of the two
+// pre-match styles, the expected value (tick) and the real first half (dot).
+const num = (v) => +v.toFixed(Math.abs(v) >= 10 ? 1 : 2);
+const STYLE_WORD = (v) => (v >= 0.6 ? "high" : v >= 0.35 ? "medium" : "low");
+function renderPrematch(d) {
+  const p = d.prematch;
+  $("preCard").hidden = d.mode !== "analyst" || !p;
+  if (!p || d.mode !== "analyst") return;
+  const name = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
+  const w = p.prematch_win_pct, st = p.styles;
+  const scout = (side) => `${esc(name(side))}: press ${STYLE_WORD(st[side].press)} (${st[side].press}), directness ${STYLE_WORD(st[side].directness)} (${st[side].directness})`;
+  const row = (r) => {
+    const lo = Math.min(r.low, r.actual), hi = Math.max(r.high, r.actual), span = (hi - lo) || 1;
+    const X = (v) => 4 + 92 * (v - lo) / span;
+    const cls = r.good_for_focus === null ? "" : r.good_for_focus ? "good" : "bad";
+    const dot = r.good_for_focus === null ? "var(--text-secondary)" : r.good_for_focus ? "var(--hi)" : "var(--away)";
+    return `<div class="prerow"><div>${esc(r.label)}<span class="who">${esc(d.teams[r.side])}</span></div>
+      <div class="range" aria-hidden="true"><span class="band" style="left:${X(r.low)}%;width:${Math.max(1, X(r.high) - X(r.low))}%"></span><span class="tick" style="left:${X(r.expected)}%"></span><span class="dot" style="left:${X(r.actual)}%;background:${dot}"></span></div>
+      <div class="val">exp. ${esc(num(r.expected))} <span class="muted">(${esc(num(r.low))}–${esc(num(r.high))})</span> · <b class="${cls}">${esc(r.actual)}</b></div></div>`;
+  };
+  const changed = p.changes.map((c) => p.rows.find((r) => r.side === c.side && r.key === c.key));
+  const rest = p.rows.filter((r) => r.verdict === "as_expected");
+  $("pre").innerHTML = `<div class="pre">
+    <p class="pre-outlook"><b>Before kick-off</b> ${esc(name("home"))} win ${w.home}% · draw ${w.draw}% · ${esc(name("away"))} win ${w.away}% <span class="muted">(${p.simulations} simulations of the two pre-match styles)</span>. <b>Half-time</b> ${d.score.home}–${d.score.away}.</p>
+    <p class="pre-scout">Scouting report: ${scout("home")} · ${scout("away")}</p>
+    <h3 style="font-size:14px;margin:6px 0 2px">Outside the expected range (${changed.length})</h3>
+    ${changed.map(row).join("") || '<p class="muted">Everything is within the expected range.</p>'}
+    <details><summary>As expected (${rest.length})</summary>${rest.map(row).join("")}</details>
+    <p class="teamnote">Bar: 10th to 90th percentile of the simulated first halves. Tick: expected (average). Dot: this match, green if it helps ${esc(d.focus_team)}, red if it hurts.</p></div>`;
+}
+
+// Player cards: a squad picker, an action heatmap in the player's attacking
+// frame, the card's numbers and an insight written in code.
+function renderPlayers(d) {
+  const cards = d.player_cards || [];
+  $("playersCard").hidden = !cards.length;
+  if (!cards.length) return;
+  $("playersHead").textContent = `Players · ${d.focus_team}`;
+  const fav = d.mode === "fan" && state.player && cards.find((c) => c.name === state.player);
+  const keep = cards.find((c) => c.id === state.card);
+  const best = cards.reduce((a, c) => (c.stats.xt_created > a.stats.xt_created ? c : a), cards[0]);
+  state.card = (fav || keep || best).id;
+  $("squad").innerHTML = cards.map((c) => `<button role="tab" data-id="${esc(c.id)}" aria-selected="${c.id === state.card}">${esc(c.name)}<span class="pos">${esc(c.position)}</span></button>`).join("");
+  $("squad").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    state.card = b.dataset.id;
+    $("squad").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    drawPlayerCard(d, cards.find((c) => c.id === state.card));
+  }));
+  drawPlayerCard(d, cards.find((c) => c.id === state.card));
+}
+
+const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
+
+function drawPlayerCard(d, c) {
+  const st = c.stats, hm = c.heatmap, color = d.focus === "away" ? "var(--away)" : "var(--home)";
+  const s = 5, cw = 105 / hm.grid[0].length, rh = 68 / hm.grid.length;
+  const max = Math.max(1, ...hm.grid.flat());
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 525 360"); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${c.name} action heatmap, attacking left to right`);
+  const line = { fill: "none", stroke: "var(--pitch-line)", "stroke-width": 1.5 };
+  el("rect", { x: 0, y: 0, width: 525, height: 340, fill: "var(--pitch)", rx: 6 }, svg);
+  const defs = el("defs", {}, svg), uid = "heat" + c.id;
+  el("feGaussianBlur", { stdDeviation: 9 }, el("filter", { id: uid + "b", x: "-10%", y: "-10%", width: "120%", height: "120%" }, defs));
+  el("rect", { width: 525, height: 340, rx: 6 }, el("clipPath", { id: uid + "c" }, defs));
+  const layer = el("g", { filter: `url(#${uid}b)`, "clip-path": `url(#${uid}c)` }, el("g", { "clip-path": `url(#${uid}c)` }, svg));
+  // Row 0 is y = 0, the right touchline when attacking left to right, so it is
+  // drawn at the bottom.
+  hm.grid.forEach((row, r) => row.forEach((n, col) => {
+    if (!n) return;
+    const cell = el("rect", { x: col * cw * s, y: (68 - (r + 1) * rh) * s, width: cw * s, height: rh * s,
+                              fill: color, "fill-opacity": (0.1 + 0.85 * n / max).toFixed(2) }, layer);
+    cell.addEventListener("mousemove", (e) => showTip(e, `${n} action${n === 1 ? "" : "s"}`));
+    cell.addEventListener("mouseleave", hideTip);
+  }));
+  el("rect", { x: 1, y: 1, width: 523, height: 338, ...line }, svg);
+  el("line", { x1: 262.5, x2: 262.5, y1: 0, y2: 340, ...line }, svg);
+  el("circle", { cx: 262.5, cy: 170, r: 45.75, ...line }, svg);
+  for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
+  el("text", { x: 262.5, y: 355, "text-anchor": "middle" }, svg).textContent = "Attacking →";
+  const t = hm.thirds_pct;
+  const acc = st.pass_accuracy === null ? "n/a" : Math.round(st.pass_accuracy * 100) + "%";
+  const chips = [
+    ["Passes", `${st.passes_complete}/${st.passes} (${acc})`],
+    ["Threat (xT)", `${st.xt_created} · ${ordinal(c.xt_rank)} in team`],
+    ["Shots", `${st.shots} (xG ${st.xg})`],
+    ["Pressures", st.pressures],
+    ["Tackles + interceptions", st.defensive_actions],
+    ["Lost in own half", st.lost_ball_in_own_half],
+  ];
+  if (st.top_sprint_kmh) chips.push(["Top sprint", st.top_sprint_kmh + " km/h"]);
+  $("pcard").innerHTML = `<div class="pitchwrap"></div><div>
+    <h3>${esc(c.name)} <span class="muted">#${c.number} · ${esc(c.position)}</span></h3>
+    <p class="insight">${esc(c.insight)}</p>
+    <div class="chips">${chips.map(([k, v]) => `<span class="chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
+    <div class="depth" aria-hidden="true"><span style="flex:${t.defensive};background:${color};opacity:.35"></span><span style="flex:${t.middle};background:${color};opacity:.65"></span><span style="flex:${t.final};background:${color}"></span></div>
+    <div class="depthlab"><span>Own third ${t.defensive}%</span><span>Middle ${t.middle}%</span><span>Final third ${t.final}%</span></div>
+    <p class="pnote">${hm.actions} first-half actions: passes, shots, pressures, tackles and interceptions where they happened, plus passes received. Event data, not tracking; the synthetic generator models depth, not which flank a player plays on.</p></div>`;
+  $("pcard").querySelector(".pitchwrap").appendChild(svg);
+}
+
+// Team report: attack and defence rows for both sides, with the focus team's
+// rate before and after the turning point. Arrows are coloured by whether the
+// change is good for the focus team, using the "better" direction from code.
+function renderTeam(d) {
+  const r = d.team_report;
+  $("teamCard").hidden = d.mode !== "analyst" || !r;
+  if (!r || d.mode !== "analyst") return;
+  const opp = d.focus === "home" ? "away" : "home", t = r.turning_point;
+  const fmt = (v) => (v === null || v === undefined ? "n/a" : v);
+  const short = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
+  $("teamHead").textContent = `Team report · ${d.focus_team}`;
+  const table = (title, rows) => `<div><h3>${title}</h3><table class="report">
+    <tr><th></th><th>${esc(short(d.focus))}</th><th>${esc(short(opp))}</th><th>${esc(short(d.focus))} 0–${t}' → ${t}'+</th></tr>` +
+    rows.map((x) => {
+      let cls = "", arrow = "→";
+      if (x.us_before !== null && x.us_after !== null && x.us_before !== x.us_after) {
+        const rose = x.us_after > x.us_before;
+        arrow = rose ? "▲" : "▼";
+        cls = rose === (x.better === "higher") ? "up" : "down";
+      }
+      return `<tr><td>${esc(x.label)}</td><td><b>${esc(fmt(x.us))}</b></td><td>${esc(fmt(x.them))}</td>
+        <td>${esc(fmt(x.us_before))} <span class="${cls}">${arrow}</span> ${esc(fmt(x.us_after))}${x.split_unit ? `<span class="unit">*</span>` : ""}</td></tr>`;
+    }).join("") + "</table></div>";
+  $("team").innerHTML = table("Attacking", r.attack) + table("Defending", r.defence);
+  $("team").insertAdjacentHTML("beforeend", `<p class="teamnote" style="grid-column:1/-1">Green arrows are changes that help ${esc(d.focus_team)}, red ones hurt. * Counts are per 10 minutes either side of the turning point at ${t}', so the two spells compare fairly. PPDA is opponent passes per defensive action: lower means a more intense press.</p>`);
+}
+
+function drawMomentum(tl, tp, upto = 45) {
+  const svg = $("momentum"); svg.innerHTML = "";
+  const W = 520, H = 190, L = 28, R = 8, T = 10, B = 26, mid = T + (H - T - B) / 2, half = (H - T - B) / 2;
+  const bw = (W - L - R) / tl.length;
+  if (tp && tp < upto) {
+    // Shade the spell after the turning point so the change of game reads at a glance.
+    el("rect", { x: L + (tp / 5) * bw, y: T, width: W - R - (L + (tp / 5) * bw), height: H - T - B,
+                 fill: "var(--surface-2)", rx: 4 }, svg);
+  }
+  el("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: "var(--border)" }, svg);
+  tl.forEach((w, i) => {
+    el("text", { x: L + i * bw + bw / 2, y: H - 8, "text-anchor": "middle" }, svg).textContent = w.from + "'";
+    if (w.from >= upto) return;
+    const v = w.momentum, hgt = Math.max(2, Math.abs(v) * half), x = L + i * bw + 3;
+    const g = el("g", {}, svg);
+    el("rect", { x, y: v >= 0 ? mid - hgt : mid, width: bw - 6, height: hgt, rx: 4,
+                 fill: v >= 0 ? "var(--home)" : "var(--away)" }, g);
+    const hit = el("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }, g);
+    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${w.home.xt_created}, xG ${w.home.xg}<br>Away xT ${w.away.xt_created}, xG ${w.away.xg}<br>Home possession ${w.home.possession_pct}%`));
+    hit.addEventListener("mouseleave", hideTip);
+  });
+  if (tp && tp < upto) {
+    const x = L + (tp / 5) * bw;
+    el("line", { x1: x, x2: x, y1: T, y2: H - B, stroke: "var(--text-primary)", "stroke-dasharray": "4 3", "stroke-width": 1.5 }, svg);
+    const t = el("text", { x: x + 6, y: T + 12 }, svg);
+    t.textContent = "Turning point " + tp + "'"; t.style.fontWeight = 650; t.style.fill = "var(--text-primary)";
+  }
+}
+
+function drawPitch(shots, teams, upto = 46) {
+  const svg = $("pitch"); svg.innerHTML = ""; const s = 5; // 105 x 68 m -> 525 x 340
+  const line = { fill: "none", stroke: "var(--pitch-line)", "stroke-width": 1.5 };
+  el("rect", { x: 0, y: 0, width: 525, height: 340, fill: "var(--pitch)", rx: 6 }, svg);
+  el("rect", { x: 1, y: 1, width: 523, height: 338, ...line }, svg);
+  el("line", { x1: 262.5, x2: 262.5, y1: 0, y2: 340, ...line }, svg);
+  el("circle", { cx: 262.5, cy: 170, r: 45.75, ...line }, svg);
+  for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
+  for (const x0 of [0, 525 - 27.5]) el("rect", { x: x0, y: 170 - 45.75, width: 27.5, height: 91.5, ...line }, svg);
+  for (const sh of shots) {
+    if (sh.minute >= upto) continue;
+    // Home attacks right as recorded; away shots are mirrored to attack left.
+    const x = sh.team === "home" ? sh.x * s : (105 - sh.x) * s, y = sh.team === "home" ? sh.y * s : (68 - sh.y) * s;
+    const color = sh.team === "home" ? "var(--home)" : "var(--away)", goal = sh.outcome === "goal";
+    const r = 5 + Math.sqrt(sh.xg) * 18;
+    const c = el("circle", { cx: x, cy: y, r, fill: goal ? color : "transparent", "fill-opacity": goal ? 0.9 : 0,
+                            stroke: color, "stroke-width": 2 }, svg);
+    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${sh.xg} · ${esc(sh.outcome.replace("_", " "))}`));
+    c.addEventListener("mouseleave", hideTip);
+  }
+}
+
+const BAR_ROWS = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
+                  ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
+function drawBars(sum) {
+  $("bars").innerHTML = BAR_ROWS.map(([label, k, mul]) => {
+    const h = +(sum.home[k] * (mul || 1)).toFixed(mul ? 0 : 2), a = +(sum.away[k] * (mul || 1)).toFixed(mul ? 0 : 2);
+    const tot = h + a || 1;
+    return `<div class="row"><div class="label">${label}</div><span class="v">${h}</span>
+      <div class="track"><span style="flex:${h / tot};background:var(--home)"></span><span style="flex:${a / tot};background:var(--away)"></span></div>
+      <span class="v r">${a}</span></div>`;
+  }).join("");
+}
+
+function evidenceChips(f) {
+  const show = (x) => (x === null || x === undefined ? "n/a" : x);
+  return (f.evidence || []).map((e) => {
+    if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → <b>${esc(show(e.after))}</b></span>`;
+    const v = e.value && typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${show(x)}`).join(", ") : show(e.value);
+    return `<span class="chip">${esc(e.label)}: <b>${esc(v)}</b></span>`;
+  }).join("");
+}
+
+const KINDS = { goal: "goal", big_chance_missed: "big chance", threat_pass: "threat pass" };
+function momentChips(f) {
+  if (!f.moments || !f.moments.length) return "";
+  const clock = (m) => `${m.minute}:${String(m.second).padStart(2, "0")}`;
+  return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
+}
+
+const choice = (finding) => state.choices[finding] || "a";
+
+async function runCheck() {
+  const d = state.data, btn = $("check60");
+  if (!d || d.mode !== "analyst") return;
+  const token = ++state.checkReq;
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const res = await fetch("api/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ focus: d.focus, choices: { press: choice("press"), threat: choice("threat"), scoreline: choice("scoreline") }, findings: d.findings, changes: d.changes }),
+    });
+    if (!res.ok) throw new Error("check request failed (" + res.status + ")");
+    const check = await res.json();
+    if (token !== state.checkReq || d !== state.data) return;
+    state.check = check;
+    renderCheck(check);
+  } catch (err) {
+    if (token !== state.checkReq || d !== state.data) return;
+    $("out").querySelector(".checkbar .muted").textContent = "Could not run the check: " + err.message + ". Try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = "⏱ Check at 60'";
+  }
+}
+
+function renderCheck(k) {
+  const verdicts = Object.fromEntries(k.verdicts.map((v) => [v.finding, v]));
+  const agent = k.trace.find((t) => t.agent === "verifier") || {};
+  for (const c of k.checks) {
+    const slot = $("out").querySelector(`.checkslot[data-finding="${c.finding}"]`);
+    if (!slot) continue;
+    const v = verdicts[c.finding] || {};
+    const goal = c.direction === "below" ? "under" : "at least";
+    slot.innerHTML = `<div class="check ${c.on_track ? "ok" : "no"}"><b class="badge">${c.on_track ? "On track" : "Not yet"} · ${k.until}'</b><span class="meta">${esc(c.label)}: <b>${esc(c.value)}</b> (target ${goal} ${esc(c.target)}) · score ${k.score.home}–${k.score.away}</span>
+      <p>${esc(v.verdict || "")}</p>
+      <p class="meta">Verifier: ${esc(agent.backend || "")}${agent.ms ? " · " + agent.ms + " ms" : ""}. Synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
+  }
+}
+
+const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
+function renderOutput(d) {
+  const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
+  const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
+  if (d.mode === "analyst") {
+    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2>
+      <div class="checkbar"><button class="btn" id="check60">⏱ Check at 60'</button><p class="muted">Pick an option under each call, then check whether its target is being met after 15 minutes of the second half.</p></div>
+      <div class="reveal">` + d.changes.map((c, i) => {
+      const f = finds[c.finding] || {}, x = expl[c.finding] || {};
+      const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
+      return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(f.title || c.action)}</span></h3>
+        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}</div>
+        <div class="body"><p>${esc(x.why_it_matters || "")}</p>
+        <div class="chips">${evidenceChips(f)}</div>
+        <div class="options" data-finding="${esc(c.finding)}">
+          <div class="option rec${choice(c.finding) === "a" ? " chosen" : ""}" data-option="a" role="button" tabindex="0"><b>Option A</b><span class="pick">recommended</span><span class="chosen-mark">✓ chosen</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
+          <div class="option${choice(c.finding) === "b" ? " chosen" : ""}" data-option="b" role="button" tabindex="0"><b>Option B</b><span class="chosen-mark">✓ chosen</span><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
+        </div>
+        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
+        ${momentChips(f)}
+        <div class="checkslot" data-finding="${esc(c.finding)}"></div></div></div>`;
+    }).join("") + "</div>";
+    $("out").querySelectorAll(".option").forEach((el) => {
+      const pick = () => {
+        const box = el.parentElement;
+        state.choices[box.dataset.finding] = el.dataset.option;
+        box.querySelectorAll(".option").forEach((o) => o.classList.toggle("chosen", o === el));
+        clearCheck();
+      };
+      el.addEventListener("click", pick);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
+    $("check60").addEventListener("click", runCheck);
+    if (state.check && state.check.focus === d.focus) renderCheck(state.check);
+  } else {
+    const fan = d.fan, rtl = fan.language === "ar";
+    $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
+      <h3>${esc(fan.headline)}</h3>${fan.story.map((p) => `<p>${esc(p)}</p>`).join("")}
+      ${fan.spotlight ? `<div class="spot"><div class="tag">Player spotlight</div><p>${esc(fan.spotlight.line)}</p></div>` : ""}
+      <p class="watch"><b>Second half</b> ${esc(fan.watch_for)}</p>
+      ${fan.note ? `<p class="muted">${esc(fan.note)}</p>` : ""}</div>`;
+  }
+}
+
+// Broadcast preview: draws each timed overlay card the way a graphics engine would.
+const tv = { i: 0, timer: null };
+function renderTv(cards, i) {
+  tv.i = i; const c = cards[i], d = state.data;
+  const bug = `<div class="gfx mini-bug"><span>${esc(d.teams.home)}</span><span class="s">${d.score.home}-${d.score.away}</span>` +
+    `<span>${esc(d.teams.away)}</span><span class="ht">HT</span></div>`;
+  let body = "";
+  if (c.type === "stat_bars") {
+    body = `<div class="gfx panel"><h4>${esc(c.title)}</h4>` + c.rows.map((r) => {
+      const tot = (r.home + r.away) || 1;
+      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home)}</span>
+        <span class="bar"><i style="flex:${r.home / tot};background:var(--home)"></i><i style="flex:${r.away / tot};background:var(--away)"></i></span>
+        <span class="r">${esc(r.away)}</span></div>`;
+    }).join("") + "</div>";
+  } else if (c.type === "momentum") {
+    const bars = c.series.map((s) => {
+      const h = Math.max(2, Math.abs(s.value) * 40);
+      return `<i style="display:block;height:${h}px;margin-top:${s.value >= 0 ? 40 - h : 40}px;flex:1;border-radius:2px;background:var(--${s.value >= 0 ? "home" : "away"})"></i>`;
+    }).join("");
+    body = `<div class="gfx panel"><h4>${esc(c.title)}</h4><div style="display:flex;gap:3px;align-items:flex-start;height:82px">${bars}</div>` +
+      (c.marker ? `<div style="font-size:.85em;opacity:.8;margin-top:4px">${esc(c.marker.label)} · ${esc(c.marker.minute)}'</div>` : "") + "</div>";
+  } else if (c.type === "lower_third") {
+    body = `<div class="gfx lower"><span class="k">${esc(CONCEPTS[c.concept] || c.concept)}</span><span class="t">${esc(c.title)}</span></div>`;
+  }
+  $("tv").innerHTML = bug + body;
+  $("tvDots").innerHTML = cards.map((x, j) => `<button class="${j <= i ? "on" : ""}" aria-label="Card ${j + 1}: ${esc(x.type)} at ${x.at_s} s"></button>`).join("");
+  [...$("tvDots").children].forEach((b, j) => b.addEventListener("click", () => { stopTv(); renderTv(cards, j); }));
+  $("tvMeta").textContent = `Card ${i + 1} of ${cards.length} · ${c.at_s} s, on for ${c.duration_s} s`;
+}
+function stopTv() { clearTimeout(tv.timer); tv.timer = null; $("tvPlay").textContent = "▶ Play"; }
+function playTv() {
+  if (!state.data) return;
+  const cards = state.data.overlays;
+  if (tv.timer) return stopTv();
+  $("tvPlay").textContent = "❚❚ Pause";
+  if (tv.i >= cards.length - 1) renderTv(cards, 0);
+  // Real durations are 6-8 s per card; play them at a third of that so a demo keeps moving.
+  const step = () => {
+    tv.timer = setTimeout(() => {
+      if (tv.i >= cards.length - 1) return stopTv();
+      renderTv(cards, tv.i + 1); step();
+    }, cards[tv.i].duration_s * 1000 / 3);
+  };
+  step();
+}
+
+// Replay: stream the first half's events, ticking the clock, score, chart and shot map as they arrive.
+async function replay() {
+  const d = state.data;
+  if (!d || state.replaying) return;
+  state.replaying = true;
+  const btn = $("replay"); btn.disabled = true;
+  $("liveCard").hidden = false; const feed = $("feed"); feed.innerHTML = "";
+  try {
+    const res = await fetch("api/events?half=1");
+    if (!res.ok) throw new Error("events request failed (" + res.status + ")");
+    await playEvents(d, await res.json(), btn, feed);
+  } catch (err) {
+    feed.innerHTML = `<div class="err">Could not replay the half: ${esc(err.message)}. Try again.</div>`;
+  } finally {
+    drawScorebug(d.score, "HT", false);
+    drawMomentum(d.timeline, d.turning_point_minute);
+    drawPitch(d.shots, d.teams);
+    btn.textContent = "▶ Replay first half live";
+    state.replaying = false;
+    btn.disabled = $("out").classList.contains("loading");
+  }
+}
+
+async function playEvents(d, evs, btn, feed) {
+  const interesting = new Set(["shot", "goal", "sprint", "foul"]);
+  const score = { home: 0, away: 0 };
+  let i = 0;
+  for (let minute = 0; minute <= 46; minute++) {
+    while (i < evs.length && evs[i].minute < minute) {
+      const e = evs[i++];
+      if (e.type === "goal") {
+        Object.assign(score, e.score);
+        $("scorebug").classList.remove("flash"); void $("scorebug").offsetWidth; $("scorebug").classList.add("flash");
+      }
+      if (interesting.has(e.type)) {
+        const extra = e.type === "shot" ? ` · xG ${e.xg} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${e.speed_kmh} km/h`
+          : e.type === "goal" ? ` · ${e.score.home}-${e.score.away}` : "";
+        feed.insertAdjacentHTML("afterbegin", `<div class="${e.type === "goal" ? "big" : ""}">${e.minute}' <span class="swatch" style="background:var(--${e.team === "away" ? "away" : "home"})"></span>${esc(e.player)} ${esc(e.type.toUpperCase())}${esc(extra)}</div>`);
+      }
+    }
+    const shown = Math.min(minute, 45);
+    drawScorebug(score, minute > 45 ? "HT" : shown + "'", minute <= 45);
+    drawMomentum(d.timeline, d.turning_point_minute, Math.min(45, minute - (minute % 5)));
+    drawPitch(d.shots, d.teams, minute);
+    if (minute <= 45) btn.textContent = `● Live ${shown}'`;
+    await sleep(110);
+  }
+}
+
+document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  state.mode = b.dataset.mode; const fan = state.mode === "fan";
+  $("playerWrap").hidden = !fan; $("langWrap").hidden = !fan; stopTv(); load();
+}));
+$("focus").addEventListener("change", (e) => { state.focus = e.target.value; stopTv(); load(); });
+$("player").addEventListener("change", (e) => { state.player = e.target.value; load(); });
+$("lang").addEventListener("change", (e) => { state.lang = e.target.value; load(); });
+$("replay").addEventListener("click", replay);
+$("tvPlay").addEventListener("click", playTv);
+load();
+</script>
+</body>
+</html>

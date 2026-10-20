@@ -1,0 +1,51 @@
+{
+  "version": "claude-v2",
+  "status": "awaiting the user's manual review",
+  "base": "claude-v1",
+  "source_revision": "2719d04b2bb4f1e48b98330580f293ac68fe830f",
+  "uncommitted_changes_at_capture": "none in app source; only docs/prototypes/ was new",
+  "capture_date": "2026-10-20",
+  "seed": 27,
+  "focus": "home (Riverside FC); away also recorded",
+  "viewports": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "overflow_widths": [
+      1440,
+      1024,
+      900,
+      861,
+      768,
+      390,
+      375
+    ]
+  },
+  "fonts": "Google Fonts blocked in captures; system fallback",
+  "screenshots": {
+    "1-initial.png": "initial analyst screen, desktop",
+    "2-priority-call.png": "first (priority) call, nothing chosen",
+    "3-selected.png": "press call, Option A drafted, adopted, confirmed in place",
+    "4-follow-up.png": "press call after Check at 60'",
+    "5-mobile.png": "initial screen at 390 x 844"
+  },
+  "files": {
+    "1-initial.png": "638755eebbb15956bc20d45854fb962a31fa2fd55656e157f0d1975708f315a8",
+    "2-priority-call.png": "6078f2a7c5fa7c02e8fa588c9b59305877dd1f9afde26b8f381a367cd57dff40",
+    "3-selected.png": "246c74b8e4f2389a19b97f2a6e822c0828f52cfcc4b95b8652f68d33f04f8dc3",
+    "4-follow-up.png": "564e2083577df70069534a0c9f8f27bcd479f7ae58f1a66b2ac9d167a39cc663",
+    "5-mobile.png": "0febea7652276ef1bcaa7d0276411e4e815f36a4b1be26610add4633412a52df",
+    "capture.json": "2c132a354c758adcad2dc7c0999cde8dca7d8e8a94e7174a6dfd03784acf7a44",
+    "capture.py": "32b6db0ad61c2a0a8cd69036918e745c8b18af1529df1e9975864ce729121e59",
+    "fixtures.js": "3d165dcd81b413ca1686c0c9b9d72d64d1609a99e7341244c050e6719641216e",
+    "index.html": "906b67cd26361d231d72579b6acf39a291d2b07a4d27c9ea7a0bc3e5e101455b",
+    "notes.md": "03e4d669c150e4172f6a0bdcd9b51b132e84c197fb5d0f28cbc6f3cb496d73c3",
+    "offline.js": "09f4e36537dc1feaeea21ce4718fbee5b07c4ed23f35da93501bdb608892a793",
+    "record_fixtures.py": "508bb58e44a8fc53fde2cc8f0b4a57148965b9a9c54c732aa034b17b3863a499"
+  }
+}

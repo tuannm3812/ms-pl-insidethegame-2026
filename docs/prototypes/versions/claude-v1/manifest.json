@@ -1,0 +1,51 @@
+{
+  "version": "claude-v1",
+  "status": "archived: Claude's interface before refinement",
+  "base": "static/index.html at 2719d04 plus two script tags",
+  "source_revision": "2719d04b2bb4f1e48b98330580f293ac68fe830f",
+  "uncommitted_changes_at_capture": "none in app source; only docs/prototypes/ was new",
+  "capture_date": "2026-10-20",
+  "seed": 27,
+  "focus": "home (Riverside FC); away also recorded",
+  "viewports": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "overflow_widths": [
+      1440,
+      1024,
+      900,
+      861,
+      768,
+      390,
+      375
+    ]
+  },
+  "fonts": "Google Fonts blocked in captures; system fallback",
+  "screenshots": {
+    "1-initial.png": "initial analyst screen, desktop",
+    "2-priority-call.png": "first call as loaded (Option A preselected)",
+    "3-selected.png": "press call, Option A clicked",
+    "4-follow-up.png": "press call after Check at 60'",
+    "5-mobile.png": "initial screen at 390 x 844"
+  },
+  "files": {
+    "1-initial.png": "b3c91f787283715a703c891de552371de002154760764c970fed2b3c0e2f5347",
+    "2-priority-call.png": "65b1275bd39d45cbe8d936b9ab36244850e584f3c93fdce9cc4954b2f773f60b",
+    "3-selected.png": "65b1275bd39d45cbe8d936b9ab36244850e584f3c93fdce9cc4954b2f773f60b",
+    "4-follow-up.png": "2f35941606af4f35385e7ce3783e2d1c696db56745f0991b6277b36377307ab5",
+    "5-mobile.png": "5b0f05d8865c4b82a5d48a1cab98524299821777d9facf931993d65ca12db3c4",
+    "capture.json": "e2f15385000cf8022c2f1bc5f98559a6644075a8846454ad4ba73c3cff9d523f",
+    "capture.py": "6161b49ba8c736bdfde73a762d9345345718c1910e13f80e5dc59f9d4996542e",
+    "fixtures.js": "37cedd3c322c2d9ddde8e67a9b9ed2aad2de01afdbce741ede4d1d899c7b9a4a",
+    "index.html": "812a6751e0d42b4637bee9ffa10eaf9017c8a388536d8000b84136836555a1bc",
+    "notes.md": "5ae2596bff1c2d826dd6576d7609e6bba968484256139c7749fee0d00014f2d2",
+    "offline.js": "c0a5fa02a5d7938b39bb9711bd477a73ff2e2f828ac1fd4251b8b458bd907c5e",
+    "record_fixtures.py": "50649b29bb0f55b2360ac8720f2b6d472dab113c21c00c1a9497170a6678d23c"
+  }
+}
