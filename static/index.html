@@ -299,6 +299,11 @@
   .prerow .val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .prerow .val b.good { color: var(--hi); }
   .prerow .val b.bad { color: var(--away); }
+  /* Phone width: the values take their own line under the label and range. */
+  @media (max-width: 480px) {
+    .prerow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); row-gap: 2px; }
+    .prerow .val { grid-column: 1 / -1; text-align: left; white-space: normal; }
+  }
   .prerow .range { position: relative; height: 22px; }
   .prerow .band { position: absolute; top: 7px; height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); box-sizing: border-box; }
   .prerow .tick { position: absolute; top: 3px; width: 2px; height: 16px; margin-left: -1px; background: var(--text-secondary); }

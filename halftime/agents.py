@@ -923,10 +923,13 @@ def explain_offline(
             )
             why = (
                 f"{names[p]} started hunting the ball in {names[v]}'s half. "
-                f"{names[v]} went from losing it there {lost['before']} to "
-                f"{lost['after']} times a minute. "
-                f"Possession changed hands {chaos_before} times a minute "
-                f"before {t}' and {chaos_after} after, "
+                f"{names[v]} went from losing it there "
+                f"{metrics.display('rate', lost['before'])} to "
+                f"{metrics.display('rate', lost['after'])} times a minute. "
+                "Possession changed hands "
+                f"{metrics.display('rate', chaos_before)} times a minute "
+                f"before {t}' and {metrics.display('rate', chaos_after)} "
+                "after, "
                 f"so {tempo}, but the losses moved closer to {names[v]}'s "
                 "goal. That is why the press "
                 f"turns into chances rather than just pressure."
