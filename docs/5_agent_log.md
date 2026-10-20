@@ -1764,3 +1764,267 @@ existing token and focus guards still drop stale replies.
 - The target id encodes only finding, focus and version, so it catches
   a focus change but not a different first half under the same seed.
 - Not merged or deployed.
+
+## 2026-10-21 · Codex → Claude · Review of v2 integration, pass 9
+
+**Scope.** Reviewed PR #9 head
+`f15e05eeb9dc3a2cabe9efe6155844df3ba81d76`, principally the app integration
+relative to `ae72e5f`, plus the version archives added by `ae72e5f` relative
+to `2719d04`. Read the project standard, Claude's response to the design
+request, snapshot notes and integration log. Independent reviewers checked
+backend behavior and UI/state/snapshot code; Codex reproduced the main
+backend findings and inspected the archived v2 in the actual browser.
+References below are to this head unless an archived file is named.
+
+**Assessment.** The refinement preserves the fuller product while adding
+the requested decision workflow. The immutable snapshots and comparison
+page are useful, and the tests/lint pass. Three functional issues should
+be fixed before merging this integration; a keyboard issue also needs a
+follow-up. Archived versions should stay untouched: capture a v3 for any
+revised visual behavior.
+
+1. **P2 — A valid opponent scoreline finding crashes the check.**
+   `halftime/agents.py:1434-1438` branches on `f['team'] == opp` before
+   establishing that this is a threat finding. A scoreline finding is
+   allowed to name either team by `check_findings`, but has no required
+   `channel`. It enters this branch and raises `KeyError: 'channel'`.
+   Verified offline `/api/check` returns HTTP 500 for a seed-27 otherwise
+   canonical briefing whose scoreline team is away. The independent
+   reviewer also supplied an opponent scoreline through ScriptedClient:
+   it passed tactics validation and the later check failed. Restrict the
+   channel branch to the threat finding; check scoreline as xG regardless
+   of which side its accepted description names. Add a regression through
+   the API and the accepted model-output path.
+
+2. **P2 — Rejected/undecided calls still become chosen options for the
+   verifier.** `halftime/agents.py:1680-1682` defaults missing options to A
+   without considering decision status. At `1710-1718` neither the model
+   input nor the fallback receives the decision record. Reproduced seed 5,
+   home, all three records rejected with null options: the threat check is
+   met (0.22 against at least 0.22, 48 threatening passes), and the verifier
+   says “Keep option A under review: Keep overloading the centre…” with
+   `next='keep'`. This is incompatible with the analyst's explicit rejection,
+   even though the outer UI labels the result monitoring-only. Related
+   validation gap at `1634-1643`: adopted + implemented + null option is
+   accepted by the API with HTTP 200 and silently becomes choice A. Require
+   an option for adoption/implementation, pass decision state to both
+   verifier paths, and keep monitoring results free of chosen-option advice
+   when no action was adopted. Test rejected, deferred, open and adopted
+   but unconfirmed records against a target that is met.
+
+3. **P2 — “Best when” can describe a different action than the model's
+   option.** `halftime/agents.py:705-711` assigns fixed A/B suitability text
+   by finding/team alone, then `1937-1947` attaches it to the accepted coach
+   output. The coach contract does not require those fixed action meanings
+   or ordering. Verified using ScriptedClient with valid canonical coach
+   options swapped together with their costs: all model steps are accepted
+   with empty trace notes, but option A now says to play short through the
+   press while its “Best when” still describes a quick forward running
+   behind a high line. Suitability must be tied to the actual option, e.g.
+   a validated action kind or text generated alongside that option with a
+   matching fallback. Merely labelling it rules text does not correct the
+   mismatch. Add a reversed-option/model-variant regression.
+
+4. **P3 — Re-rendering a call loses keyboard focus.**
+   `static/index.html:940,963-978` replaces the output tree after option or
+   decision changes without restoring focus. Verified on archived Claude
+   v2 (the same render pattern): activate Option A with Enter, then the
+   active element is BODY; pressing Tab goes back to “Discuss first”
+   instead of continuing from the option toward adoption. Preserve the
+   focused control or move focus intentionally to the next relevant
+   decision control after the update. Keyboard coverage should include
+   drafting, adopting and implementation, not only the presence of tabindex.
+
+**Additional contract discussion, verified limitation.** The log's claim
+that the verifier never recommends switching is stronger than enforcement.
+At `halftime/agents.py:1529-1547`, validation restricts `next` and met status,
+not the prose. A ScriptedClient reply with `next='review'` and verdict
+“Switch to option B now.” is accepted with no rejection note, including for
+the seed-27 insufficient-xG result. Please describe the prose rule as a
+prompt instruction unless it is made enforceable. Prefer rendering the
+action recommendation from structured, decision-aware fields; a keyword
+filter would not guarantee semantic compliance. This does not negate the
+verified change from `change` to `review` in the structured output.
+
+**Verification.**
+
+- Fresh local run: **65 tests passed in 2.48 s**, Python 3.15; Ruff 0.16.8:
+  **23 files already formatted**, **All checks passed**. PR-range whitespace
+  check passed. The independent backend review also ran 8 targeted tests.
+- GitHub still reports this exact head, PR open, with `test` and `docker`
+  successful. Docker was not built locally during this pass.
+- Offline API checks set `app.client = None`; model-path probes used
+  ScriptedClient, never a live endpoint. The targeted probes above were
+  reproduced by Codex as well as the independent review where indicated.
+- Verified every recorded file hash in all three manifests: 12 Claude v1,
+  12 Claude v2 and 6 local Codex v1 files, with no mismatches. Claude v1/v2
+  were not modified. Codex's older concept remains untracked/local-only,
+  as the comparison index already discloses.
+- Opened the actual side-by-side comparison using its frozen fixtures.
+  Both Claude versions load with reports and player cards. Verified v2's
+  option draft and keyboard-focus behavior in-browser. The prior capture
+  files document wider layout/state checks; those were not all rerun in
+  this pass. The comparison is available locally at
+  `http://localhost:8766/compare.html` while the preview server runs; the
+  durable entry is `docs/prototypes/versions/compare.html`.
+- Empty second-half evidence was checked by the backend reviewer: all
+  outcomes are insufficient, with None threat share, rather than a false
+  zero-share success.
+
+**Discussion / next pass.** Claude, retain the approved direction and
+address these as focused corrections, not another redesign. Add the edge
+cases above, keep all archived snapshots unchanged, and capture any new
+UI as v3 with notes so the user can compare it. The statistical floors and
+40% policy remain explicitly proposed, which is appropriate; they still
+need evaluation. The documented target-ID collision across match contexts
+also remains a future reliability concern, not a new undisclosed finding
+in this pass. This review does not re-certify all historical fixes or the
+live model evidence reported by Claude.
+
+**Limits.** No app changes, snapshot rewrites, live model calls, commit,
+push, GitHub comment, merge or deployment. Only this append-only discussion
+was added to the repository; temporary probe files stayed outside it.
+
+## 2026-10-21 · Codex → Claude · Pass 9 comparison-page addendum
+
+**Additional verified P3.** While capturing the comparison page after the
+review, the narrow layout exposed a separate preview problem.
+`docs/prototypes/versions/compare.html:16-20` changes the main grid to
+auto height and specifies `80vh` for the iframe, but keeps the iframe as
+`flex: 1` inside an auto-sized pane. At the actual 781 × 853 browser
+viewport, both iframe bounding boxes are only **150 px high** (763 px
+wide), verified via the DOM and screenshot. The user can scroll within
+each frame but sees only a thin strip, making the manual comparison much
+harder. Give the narrow pane an explicit height or a non-shrinking iframe
+size; check the comparison wrapper as well as the individual prototypes.
+Both snapshots load correctly; this corrects any impression that the
+comparison layout itself was fully validated by the preceding entry.
+The wrapper may be fixed without rewriting either archived version.
+
+## 2026-10-21 · Codex → Claude · Content audit: metric formatting and player roles
+
+**User direction.** The user asks us to check content, particularly rounding
+and consistency of metrics, and tailor player insights to position. They
+will review other areas more deeply later. This entry adds a concrete
+content brief for the next refinement without replacing earlier review
+findings or changing saved prototypes. Reviewed local `f15e05e` and
+recomputed seed-27 facts/player cards offline.
+
+**Verified findings.**
+
+1. **P2 — Player “Tackles + interceptions” includes fouls.**
+   `halftime/metrics.py:255-256` increments `defensive_actions` using
+   `DEFENSIVE_ACTIONS`, which includes fouls; `static/index.html:678` labels
+   that total “Tackles + interceptions”. Seed 27 Navarro shows 11, but raw
+   events contain 10 tackles/interceptions plus one foul. Brennan, Ferreira
+   and Novak also include a foul in that chip. An additional 10-seed sweep
+   (0–9, 220 player cards) found 46 such mismatches. Split out tackles,
+   interceptions and fouls for the player card, or accurately relabel the
+   aggregate. Do not remove fouls from the shared constant without checking
+   PPDA, which deliberately uses its broader defensive-action definition.
+
+2. **P3 — One metric has different units/precision across views.**
+   `static/index.html:770-785` renders headline pass accuracy as an integer
+   percentage and xT to two decimals, while team reports at `700-713` and
+   evidence chips render raw values. Seed 27 home pass accuracy is 0.789:
+   the headline shows 79% while the report shows 0.789 without a percent
+   suffix. Home xT is 1.165 in the report but 1.17 in the headline. The
+   pre-match row at `593,609` applies magnitude-based rounding only to the
+   expected value/range, leaving actual values raw (e.g. away accuracy
+   expected 0.76 versus actual 0.721). These are presentation inconsistencies,
+   not evidence that the same underlying total was computed differently.
+   Format by metric identity and unit, consistently across all views.
+
+3. **Position is present but unused in insight selection.**
+   `halftime/metrics.py:402-431` selects the same goal/xT/loss/pressure/pass
+   narrative for every player; `p['position']` is never consulted. The
+   player card also orders the same chips for every position at
+   `static/index.html:673-680`. Seed 27 Brennan (ST) leads with “Completed
+   16 of 27 passes”, despite one shot and 0.07 xG being available. Okafor
+   (GK) leads with “100% of their work in the defensive third”, which mostly
+   restates the generator's positional distribution rather than explaining
+   his contribution. This is a verified gap against the user's new product
+   requirement, not a claim that the older implementation violated an
+   existing position-specific contract.
+
+**Claude: proposed formatting contract for the next version.** Use one
+metric registry/formatter rather than a generic `num()` or label matching.
+Carry metric key, numeric value, unit, team/player and window into evidence
+items so rendering does not infer semantics from free-text labels.
+
+| Metric | Proposed display | Notes |
+| --- | --- | --- |
+| Actual counts: goals, shots, passes, pressures | Integer | Keep successful/attempted counts visible for ratios |
+| Pass accuracy, possession, shares | One decimal + % | Convert fractions once; possession/share already use 0–100 |
+| xG | Two decimals | e.g. 0.40; same precision in cards, reports and narrative |
+| xT | Three decimals | e.g. 1.165 or 0.006; small positive values must not look like zero |
+| Loss/press rates | Two decimals + denominator | e.g. 1.48/min; never mix with counts |
+| PPDA | One decimal | Label what it measures; it is not a percentage |
+| Speed | One decimal + km/h | State observed sprint versus roster capability if both appear |
+| Simulated mean counts | One decimal | Expected counts can be fractional; observed counts cannot |
+
+This table is a proposed display policy, not a new statistical claim. Apply
+it to pre-match actual/expected/range, headline bars, team rows, evidence,
+player cards, tooltips, Watch targets, follow-up and broadcast output.
+Use n/a for missing data and 0 only for a measured zero. Do not turn every
+number into a percentage because its magnitude is below one. Define a
+single rounding rule, including half-way cases and trailing zeros, instead
+of mixing Python round and JavaScript toFixed/Math.round implicitly.
+
+Preserve calculation precision separately from formatted strings. In
+particular `player_stats` currently rounds pass accuracy to two decimal
+places at `275-278`; a one-decimal percentage formatter cannot recover
+the lost precision. Haddad's 35/44 is 79.545...%, while the stored 0.80
+would display 80.0%. Recompute from numerator/denominator or retain a more
+precise numeric value before applying the display policy. Do not silently
+change the already adopted Watch threshold when adjusting display rules;
+keep target definition/version, comparison precision and display aligned.
+If the displayed boundary obscures the result, reveal extra precision or
+explain the tolerance. Supply canonical display values to the model and
+grounding checks as well; frontend formatting cannot repair free-form prose.
+
+**Position-aware insight proposal (editorial rules, not a player rating).**
+Keep all measured statistics accessible, but choose headline evidence and
+order the chips by role. Use a small role family mapping; do not create
+unsupported role-specific claims from position alone.
+
+| Role | Lead with supported content | Avoid without additional data |
+| --- | --- | --- |
+| GK | Distribution completed/attempted; own-half losses; observed passing under pressure if computed | Saves, claims, sweeping or shot-stopping quality: no such keeper-attributed metrics currently exist |
+| CB | Separate tackles/interceptions; own-half losses; build-up distribution | Aerial dominance, marking quality or duels won from aggregate event counts |
+| RB/LB | Progression/xT, final-third recorded actions, defensive events | Crossing quality or overlap/underlap claims; lateral positions are synthetic noise |
+| DM | Retention, own-half losses, defensive events, progression | “Controlled midfield” or screening effectiveness as a fact |
+| CM | Progression/xT, distribution, pressures and recorded activity | Assists/key passes unless derived with an explicit event definition |
+| RW/LW | Threat creation, shots/xG, final-third recorded actions | Dribble success, flank dominance or off-ball runs without measurements |
+| ST | Shots/xG/goals first; then link play and pressures | “Poor movement” from few touches, or a finishing verdict from one shot |
+
+For example, an evidence-only Brennan summary can say: “Brennan (ST)
+recorded 1 shot worth 0.07 xG and no goals. In link play, he completed
+16 of 27 passes.” Okafor can lead with: “Okafor (GK) completed 17 of 20
+passes; 3 own-half losses were attributed to him.” These numbers were
+recomputed from seed 27; the selection/order is a design proposal.
+
+Prefer “recorded actions” to “work” in heatmap summaries: event locations
+are not time spent, distance covered or off-ball effort. For no recorded
+actions, say that explicitly rather than “barely involved”. Show evidence
+coverage and sample counts. Position tailoring should also avoid arbitrary
+team-wide xT rankings as a headline for a goalkeeper/defender, and handle
+ties/no threat honestly rather than inferring performance from roster order.
+
+**Acceptance checks requested for Claude.** For seed 27 both teams, verify
+one value/unit/window formats identically wherever it appears; include
+percent conversion, half-way rounding, zero, null, tiny positive xT and
+missing denominators. Check 35/44 from its counts; reconcile player and
+team totals with an explicit rounding tolerance rather than expecting
+rounded parts to add exactly. Test each role family, an unknown position,
+no-action and low-shot cases. Add a foul case proving the tackle/interception
+chip excludes it. No insight may add statistics absent from its input.
+Preserve v1/v2 and show these content changes in a new snapshot with the
+same seed and player selections for manual comparison.
+
+**Verification limits.** Findings above come from code inspection and fresh
+offline metric/event probes, including all 22 seed-27 player cards and the
+220-card defensive-count sweep. No live model, new full-suite run, backend
+fix or UI change was performed in this content pass. This is an append-only
+handoff for Claude; formatting and position-aware insights are not yet
+implemented. The user can continue their deeper review independently.
