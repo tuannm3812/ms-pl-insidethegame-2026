@@ -1,0 +1,24 @@
+{
+  "overflow": {
+    "1440": 1440,
+    "1024": 1024,
+    "900": 900,
+    "861": 861,
+    "768": 768,
+    "390": 390,
+    "375": 375
+  },
+  "page_errors": [],
+  "state_checks": {
+    "adopt_disabled_before_draft": true,
+    "label_after_adopt": "Option A adopted \u00b7 In place from the restart (46')",
+    "home_press_badge": "TARGET NOT MET \u00b7 60'",
+    "after_switch_to_b": {
+      "label": "Option B drafted, not adopted",
+      "checks_shown": 0
+    },
+    "stale_check_dropped": true,
+    "away_checks_after_switch": 0,
+    "away_press_badge": "TOO CLOSE TO CALL \u00b7 60'"
+  }
+}

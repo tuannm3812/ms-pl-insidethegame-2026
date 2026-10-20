@@ -3,7 +3,7 @@
 A multi-agent app that turns synthetic football events into an explained half-time briefing.
 The same intelligence goes to two audiences:
 
-- **Analyst mode**: three calls for the second half, each with two options and their trade-offs (the coach decides), backed by evidence and a measurable target.
+- **Analyst mode**: three calls for the second half, unranked: the analyst picks which to **Discuss first**. Each call separates what was measured from the explainer's reading and a rules-written alternative, and offers two options, each with its cost and when it fits (written by the coach agent alongside that option); nothing is chosen for the analyst. Draft an option, then **Adopt**, **Defer** or **Reject** it, and record separately whether it was in place at 46'. **Check at 60'** measures each adopted Watch target on 46'-60' with its event count and reports met, not met, too close to call or not enough evidence (a proposed evidence policy), plus a cost check for calls against the focus team. The advice line is written in code from the status and the decision: a miss goes back to the staff for review, and a call that was not adopted is monitoring only. The verifier agent's own wording is shown separately; its prompt tells it not to recommend switching, and its structured `next` field may say keep only for an adopted target that is met, but its prose is not machine-checked. Below the calls: **Pre-match vs now** (the real first half against the typical range from 60 simulations of the two teams' pre-match styles, plus a pre-match win/draw/loss estimate), a **Team report** (attacking and defending, before and after the turning point) and **Player cards** (action heatmap, stats with tackles, interceptions and fouls counted separately, and an insight led by what matters for the player's position, written in code from the card's own numbers). Every number on the page, in the agents' text and in the broadcast graphics uses one display rule per metric (`halftime/metrics.py`: counts as integers, percentages to one decimal, xG to two, xT to three, rates to two with their unit), rounding half up; values keep full precision until shown.
 - **Fan mode**: a short story about your team and favourite player, in your language.
 
 Built for the Microsoft x Premier League *Inside the Game* hackathon.
@@ -24,10 +24,12 @@ Built for the Microsoft x Premier League *Inside the Game* hackathon.
 
 ```
 stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
+                                                 |
+                              at 60': stats (code) -> verifier
 ```
 
 - **Every number comes from code.** The model-backed agents only explain and decide, and their input carries the computed numbers they may quote. A model reply with the wrong shape, or with any number not in its input, is discarded and the rule-based version is used instead; the trace says so. This is a number filter: it cannot tell whether a matching number describes the right team or metric.
-- **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach and fan. The tactics agent also gets the metric functions as tools.
+- **Model-backed agents run on Microsoft Agent Framework.** That's tactics, explainer, coach, fan and the verifier (`POST /api/check`, which re-measures the coach's targets on the second half up to 60' and words a keep-or-review verdict; it may say keep only when an adopted target is met). The tactics agent also gets the metric functions as tools.
 - **Backend:** a model in Microsoft Foundry, configured in `.env` either keyless (`FOUNDRY_PROJECT_ENDPOINT` + `FOUNDRY_MODEL`, Entra ID sign-in) or with a key (`AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_DEPLOYMENT`). Plain OpenAI (`OPENAI_API_KEY`) also works.
 - **No model configured:** each agent falls back to a rule-based version with the same output shape, so the demo always runs. The same fallback catches a model reply that can't be parsed.
 - **MCP:** `halftime/mcp_server.py` exposes the same tools over MCP, so GitHub Copilot agent mode or a Foundry agent can query the match directly.
@@ -37,7 +39,7 @@ stats (code) -> tactics -> explainer -> coach | fan -> overlay (code)
 ```bash
 pip install -r requirements-dev.txt
 uvicorn app:app --reload          # http://localhost:8000
-python -m pytest -q               # 39 tests, offline
+python -m pytest -q               # 80 tests, offline
 ruff format . && ruff check .     # style and lint, as CI runs them
 python -m halftime.mcp_server     # MCP server over stdio
 ```

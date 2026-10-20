@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype versions</title>
+<style>
+  :root { --bg: #f4f3f8; --card: #fff; --text: #1a0f24; --muted: #4c4459; --border: #e1dfea; --accent: #4b0f6b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f0a17; --card: #181122; --text: #f3f0f8; --muted: #c9c2d6; --border: #33293f; --accent: #b18cff; } }
+  body { margin: 0; font: 14px system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  h1 { font-size: 16px; margin: 0; }
+  .note { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 8px 8px; height: calc(100vh - 64px); }
+  /* Narrow: stack the panes; flex: none so the 80vh height is not overridden by flex-basis 0. */
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; height: auto; } .pane iframe { flex: none; height: 80vh; } }
+  .pane { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .bar a { color: var(--accent); font-size: 12px; }
+  select { font: inherit; padding: 4px 6px; }
+  iframe { flex: 1; width: 100%; border: 0; border-radius: 0 0 8px 8px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Prototype versions</h1>
+  <span class="note">Seed 27, Riverside FC. Each pane is an archived snapshot running on recorded data; nothing here is the live app.</span>
+</header>
+<main>
+  <section class="pane"><div class="bar"><select aria-label="Left version"></select><a target="_blank">open alone</a></div><iframe title="Left version"></iframe></section>
+  <section class="pane"><div class="bar"><select aria-label="Right version"></select><a target="_blank">open alone</a></div><iframe title="Right version"></iframe></section>
+</main>
+<script>
+  const VERSIONS = [
+    ["claude-v1", "Claude v1 · before refinement"],
+    ["claude-v2", "Claude v2 · built into the app"],
+    ["claude-v3", "Claude v3 · awaiting review"],
+    ["codex-v1", "Codex v1 · concept (local checkout only)"],
+  ];
+  const start = ["claude-v2", "claude-v3"];
+  document.querySelectorAll(".pane").forEach((pane, i) => {
+    const sel = pane.querySelector("select"), frame = pane.querySelector("iframe"), link = pane.querySelector("a");
+    for (const [v, label] of VERSIONS) sel.add(new Option(label, v));
+    const show = () => { frame.src = sel.value + "/index.html"; link.href = frame.src; };
+    sel.value = start[i]; sel.addEventListener("change", show); show();
+  });
+</script>
+</body>
+</html>

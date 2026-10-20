@@ -1,0 +1,53 @@
+{
+  "version": "claude-v3",
+  "status": "awaiting the user's manual review",
+  "base": "claude-v2",
+  "source_revision": "933299566b9cf1756391948ca14f1f64345244b6",
+  "uncommitted_changes_at_capture": "none in app source; docs/prototypes/versions/claude-v3/ itself, and Codex's local-only docs/prototypes files",
+  "capture_date": "2026-10-21",
+  "seed": 27,
+  "focus": "home (Riverside FC); away also recorded",
+  "agents": "rules only (app.client = None)",
+  "viewports": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "overflow_widths": [
+      1440,
+      1024,
+      900,
+      861,
+      768,
+      390,
+      375
+    ]
+  },
+  "fonts": "Google Fonts blocked in captures; system fallback",
+  "browser": "headless Chromium via Playwright 1.64 (cached chromium_headless_shell-1243)",
+  "screenshots": {
+    "1-initial.png": "initial analyst screen, desktop",
+    "2-priority-call.png": "first (priority) call, nothing chosen",
+    "3-selected.png": "press call, Option A drafted by keyboard, adopted, confirmed in place",
+    "4-follow-up.png": "press call after Check at 60'",
+    "5-mobile.png": "initial screen at 390 x 844"
+  },
+  "files": {
+    "1-initial.png": "50c13cc5c495c84a64607c4d6402638c0fd3e78e96f0b51a0c074644743b80ad",
+    "2-priority-call.png": "036b1a5df63092149d7cc1cdb148a9e72663f60a215a49de9a64d0ccc646dd54",
+    "3-selected.png": "ea3691a865a413cf071a422b00fd74b140fa469d017c1bfa72ef564b29a6e822",
+    "4-follow-up.png": "f45717e3a07b34077a454de489257f2bd647023ce0f27b9e6cfe0a7da3d49efc",
+    "5-mobile.png": "820f418404716691a8947cbbee5316cc0c1acc4540c33a6e9686bf0944675bf3",
+    "capture.json": "bc82246068b8c891c9295dcee56b7639d4f77eda48f006e6ba352f078aa31fe0",
+    "capture.py": "3c061e9729a364bd81f8bff270c50f54309dd4b0c49ff53cc68879bfc3ddd922",
+    "fixtures.js": "f4abbd7fb0db4cc695a2aa22740c9fbe2c9c3db8da8e887613577aae501d7b5d",
+    "index.html": "2888153fa92c611442b208ab18e8550d99bb0298327b24d98c469dae367cfd4c",
+    "notes.md": "27dfa56f4b072e8974357c35b2c19c751c09d268ce5cac7731924375e95d0801",
+    "offline.js": "d82448bd8d629b211cba166ffb16340a4c8fe005636c06bb55adccc1ac5dcc06",
+    "record_fixtures.py": "1b317b322e19c7a80996be0ebadca0d80598b7aa9a5893a30e32ccdcb83628c3"
+  }
+}

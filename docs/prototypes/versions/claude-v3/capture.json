@@ -1,0 +1,64 @@
+{
+  "overflow": {
+    "1440": 1440,
+    "1024": 1024,
+    "900": 900,
+    "861": 861,
+    "768": 768,
+    "390": 390,
+    "375": 375
+  },
+  "page_errors": [],
+  "state_checks": {
+    "adopt_disabled_before_draft": true,
+    "best_when": [
+      "Best when our quick forward can run behind a back line that pushes up",
+      "Best when the keeper and centre-backs are calm on the ball under pressure"
+    ],
+    "focus_after_draft": "opt:press:a",
+    "focus_two_tabs_later": "act:press:adopted",
+    "focus_after_adopt": "act:press:adopted",
+    "focus_after_in_place": "impl:press",
+    "label_after_adopt": "Option A adopted \u00b7 In place from the restart (46')",
+    "home_press_badge": "TARGET NOT MET \u00b7 60'",
+    "home_press_next": "Next Review with staff: keep, adjust, or look again at option B (context, not a recommendation).",
+    "threat_not_adopted_next": "Next Monitoring only: no option was adopted, so there is nothing to review yet.",
+    "after_switch_to_b": {
+      "label": "Option B drafted, not adopted",
+      "checks_shown": 0
+    },
+    "stale_check_dropped": true,
+    "bars": [
+      "Possession\n54.9%\n45.1%",
+      "Expected goals (xG)\n0.73\n0.40",
+      "Threat created (xT)\n1.165\n1.366",
+      "Shots\n5\n2",
+      "Pass accuracy\n78.9%\n72.1%",
+      "High presses\n29\n106"
+    ],
+    "brennan_insight": "Brennan (ST) recorded 1 shot worth 0.07 xG and 0 goals. In link play, completed 16 of 27 passes (59.3%); 5 pressures. 61 recorded actions, 82.0% in the final third.",
+    "brennan_chips": [
+      "Shots: 1 (xG 0.07)",
+      "Passes: 16/27 (59.3%)",
+      "Pressures: 5",
+      "Threat (xT): 0.034 \u00b7 7th in team",
+      "Lost in own half: 3",
+      "Tackles: 1",
+      "Interceptions: 5",
+      "Fouls: 1",
+      "Top sprint: 33.3 km/h"
+    ],
+    "navarro_chips": [
+      "Threat (xT): 0.335 \u00b7 1st in team",
+      "Passes: 26/35 (74.3%)",
+      "Pressures: 9",
+      "Tackles: 3",
+      "Interceptions: 7",
+      "Lost in own half: 4",
+      "Fouls: 1",
+      "Shots: 1 (xG 0.15)"
+    ],
+    "away_checks_after_switch": 0,
+    "away_press_badge": "TOO CLOSE TO CALL \u00b7 60'"
+  }
+}

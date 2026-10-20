@@ -9,14 +9,18 @@ from fastapi.testclient import TestClient
 from halftime import metrics
 from halftime.agents import (
     check_changes,
+    check_findings,
     check_grounded,
+    check_verdicts,
     coach_offline,
     explain_offline,
     fan_offline,
     grounded_numbers,
     half_time_briefing,
     parse_json_reply,
+    second_half_check,
     tactics_offline,
+    watch_targets,
 )
 from halftime.generator import generate_match, shot_xg
 from halftime.xt import grid
@@ -83,7 +87,7 @@ def test_analyst_briefing_offline(match, focus):
         assert c["action"] != c["alternative"]
         assert c["tradeoff"] and c["alternative_tradeoff"]
     for f in out["findings"]:
-        assert 1 <= len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
+        assert len(f["moments"]) <= metrics.MOMENTS_PER_FINDING
         assert f["moments"] == sorted(
             f["moments"], key=lambda m: (m["minute"], m["second"])
         )
@@ -96,6 +100,87 @@ def test_analyst_briefing_offline(match, focus):
         "coach",
         "overlay",
     ]
+
+
+def test_team_report_rows_match_the_summary(match):
+    facts = metrics.half_time_facts(match)
+    for focus in metrics.SIDES:
+        r = metrics.team_report(facts, focus)
+        opp = metrics.other(focus)
+        rows = {x["key"]: x for x in r["attack"] + r["defence"]}
+        assert rows["xg"]["us"] == facts["summary"][focus]["xg"]
+        assert rows["xg_conceded"]["us"] == facts["summary"][opp]["xg"]
+        assert rows["ppda"]["better"] == "lower"
+        tp = facts["turning_point"]
+        mins = tp["before"][focus]["minutes"]
+        assert rows["shots"]["us_before"] == round(
+            10 * tp["before"][focus]["shots"] / mins, 2
+        )
+        assert rows["possession_pct"]["split_unit"] == ""
+
+
+def test_player_cards_cover_the_squad_and_add_up(match):
+    ev = metrics.window(match["events"])
+    for side in metrics.SIDES:
+        cards = metrics.player_cards(ev, match, side)
+        squad = match["teams"][side]["players"]
+        assert [c["id"] for c in cards] == [p["id"] for p in squad]
+        assert sorted(c["xt_rank"] for c in cards) == list(
+            range(1, len(squad) + 1)
+        )
+        for c in cards:
+            hm = c["heatmap"]
+            assert len(hm["grid"]) == metrics.HEAT_ROWS
+            assert all(len(r) == metrics.HEAT_COLS for r in hm["grid"])
+            assert sum(map(sum, hm["grid"])) == hm["actions"]
+            assert c["name"] in c["insight"]
+        gk = cards[0]
+        assert gk["position"] == "GK"
+        assert gk["heatmap"]["thirds_pct"]["final"] == 0
+    received = sum(
+        1
+        for e in ev
+        if e["type"] == "pass"
+        and e["outcome"] == "complete"
+        and e["receiver"] == "Silva"
+        and e["team"] == "home"
+    )
+    silva = next(
+        c
+        for c in metrics.player_cards(ev, match, "home")
+        if c["name"] == "Silva"
+    )
+    own = sum(
+        1
+        for e in ev
+        if e.get("player") == "Silva"
+        and e["team"] == "home"
+        and e["type"] in metrics.ACTION_TYPES
+    )
+    assert silva["heatmap"]["actions"] == own + received
+
+
+def test_prematch_flags_the_away_press(match):
+    from halftime import prematch
+
+    out = prematch.compare(match, "home")
+    rows = {(r["side"], r["key"]): r for r in out["rows"]}
+    press = rows[("away", "high_presses")]
+    # Seed 27's storyline: the away side was not expected to press high.
+    assert press["verdict"] == "above" and press["actual"] > press["high"]
+    assert press["good_for_focus"] is False
+    assert out["changes"][0]["key"] == "high_presses"
+    assert sum(out["prematch_win_pct"].values()) == pytest.approx(100)
+    for r in out["rows"]:
+        assert r["low"] <= r["expected"] <= r["high"]
+        inside = r["low"] <= r["actual"] <= r["high"]
+        assert (r["verdict"] == "as_expected") is inside
+    other_fixture = dict(match, teams={**match["teams"]})
+    other_fixture["teams"]["home"] = {
+        **match["teams"]["home"],
+        "name": "Elsewhere FC",
+    }
+    assert prematch.compare(other_fixture, "home") is None
 
 
 def test_press_resistance_counts_pressured_passes(match):
@@ -184,8 +269,10 @@ def test_agent_framework_path_uses_model_replies(match):
             "finding": f["id"],
             "action": f"do {i}",
             "tradeoff": "costs",
+            "best_when": "fits",
             "alternative": f"or {i}",
             "alternative_tradeoff": "costs more",
+            "alternative_best_when": "fits later",
             "watch": "x",
         }
         for i, f in enumerate(findings)
@@ -209,6 +296,99 @@ def test_broken_model_reply_falls_back_to_rules(match):
     assert "used rules" in out["trace"][1]["note"]
 
 
+@pytest.mark.parametrize("focus", ["home", "away"])
+def test_second_half_check_offline(match, focus):
+    briefing = asyncio.run(half_time_briefing(match, focus=focus))
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            focus=focus,
+            choices={"threat": "b"},
+        )
+    )
+    assert [c["finding"] for c in out["checks"]] == [
+        "press",
+        "threat",
+        "scoreline",
+    ]
+    for c in out["checks"]:
+        assert c["minutes"] == 15 and c["window"] == "46'-60'"
+        assert c["status"] in metrics.EVIDENCE_STATUSES
+        assert c["on_track"] is (c["status"] == "met")
+        assert c["target_id"] == f"{c['finding']}.{focus}.v1"
+    assert out["choices"] == {"press": "a", "threat": "b", "scoreline": "a"}
+    by_id = {v["finding"]: v for v in out["verdicts"]}
+    changes = {c["finding"]: c for c in briefing["changes"]}
+    for c in out["checks"]:
+        v = by_id[c["finding"]]
+        assert v["next"] == ("keep" if c["status"] == "met" else "review")
+        assert str(c["n"]) in v["verdict"]
+        # The verifier never points the coach at the other option.
+        other = changes[c["finding"]][
+            "action" if c["finding"] == "threat" else "alternative"
+        ]
+        assert other not in v["verdict"]
+        assert "switch" not in v["verdict"].lower()
+        assert "consider option" not in v["verdict"].lower()
+    assert [t["agent"] for t in out["trace"]] == ["stats", "verifier"]
+    with pytest.raises(ValueError, match="a or b"):
+        asyncio.run(
+            second_half_check(
+                match,
+                findings=briefing["findings"],
+                changes=briefing["changes"],
+                choices={"press": "c"},
+            )
+        )
+
+
+def test_verifier_model_reply_is_checked_and_grounded(match):
+    briefing = asyncio.run(half_time_briefing(match))
+    good = [
+        {
+            "finding": f,
+            "verdict": "Look again with the staff.",
+            "next": "review",
+        }
+        for f in ("press", "threat", "scoreline")
+    ]
+    assert check_verdicts(good) == good
+    with pytest.raises(ValueError, match="keep or review"):
+        check_verdicts([dict(v, next="change") for v in good])
+    # "keep" is only allowed for a target that is met.
+    missed = [
+        {"finding": f, "status": "not_met"}
+        for f in ("press", "threat", "scoreline")
+    ]
+    with pytest.raises(ValueError, match="keep only when"):
+        check_verdicts([dict(v, next="keep") for v in good], missed)
+    invented = [dict(v, verdict="We lost it 77 times.") for v in good]
+    client = ScriptedClient([json.dumps(invented)])
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "offline-rules"
+    assert "77" not in json.dumps(out["verdicts"])
+    client = ScriptedClient([json.dumps(good)])
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "ScriptedClient"
+    assert out["verdicts"] == good
+
+
 def test_api(monkeypatch):
     import app as app_module
 
@@ -226,6 +406,23 @@ def test_api(monkeypatch):
     )
     assert c.get("/").status_code == 200
     assert len(c.get("/api/events").json()) > 500
+    b = c.get("/api/briefing", params={"focus": "home"}).json()
+    r = c.post(
+        "/api/check",
+        json={
+            "focus": "home",
+            "choices": {"press": "b"},
+            "findings": b["findings"],
+            "changes": b["changes"],
+        },
+    )
+    assert r.status_code == 200 and r.json()["until"] == 60
+    assert r.json()["choices"]["press"] == "b"
+    bad = c.post(
+        "/api/check",
+        json={"findings": b["findings"], "changes": b["changes"][:2]},
+    )
+    assert bad.status_code == 422 and "three" in bad.json()["detail"]
 
 
 def test_key_based_foundry_client_from_env_file(tmp_path, monkeypatch):
@@ -452,8 +649,10 @@ def test_coach_reply_rejection_names_the_bad_field():
             "finding": f,
             "action": "Press higher.",
             "tradeoff": "Tired legs.",
+            "best_when": "They play out short.",
             "alternative": "Sit deeper.",
             "alternative_tradeoff": "Less of the ball.",
+            "alternative_best_when": "We need to protect a lead.",
             "watch": "Win it back.",
         }
         for f in ("press", "threat", "scoreline")
@@ -470,3 +669,588 @@ def test_coach_reply_rejection_names_the_bad_field():
     target = [dict(c, watch={"metric": "xg", "below": 1}) for c in good]
     with pytest.raises(ValueError, match="watch must be"):
         check_changes(target)
+
+
+def test_model_watch_is_replaced_by_the_checked_target(match):
+    findings, explanations, changes = _rules(match)
+    canonical = [c["watch"] for c in changes]
+    # A grounded but different target: the after-press rate, not the before.
+    lost = findings[0]["evidence"][1]["after"]
+    changes[0]["watch"] = f"Own-half losses below {lost} per minute."
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    coach = next(t for t in out["trace"] if t["agent"] == "coach")
+    assert coach["backend"] == "ScriptedClient"
+    assert "watch lines set from code" in coach["note"]
+    assert [c["watch"] for c in out["changes"]] == canonical
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    for c, change in zip(check["checks"], out["changes"], strict=True):
+        if c["finding"] != "scoreline":
+            assert str(c["target"]) in change["watch"]
+
+
+@pytest.mark.parametrize("focus", ["home", "away"])
+def test_watch_targets_match_coach_and_check(match, focus):
+    facts = metrics.half_time_facts(match)
+    findings = tactics_offline(facts, match, focus)
+    watch = watch_targets(facts, findings, focus)
+    changes = coach_offline(findings, facts, match, focus)
+    assert {c["finding"]: c["watch"] for c in changes} == {
+        f: w["text"] for f, w in watch.items()
+    }
+    check = asyncio.run(
+        second_half_check(
+            match, findings=findings, changes=changes, focus=focus
+        )
+    )
+    for c in check["checks"]:
+        assert c["direction"] == watch[c["finding"]]["direction"]
+        assert (
+            str(watch[c["finding"]]["target"]) in watch[c["finding"]]["text"]
+        )
+        if c["finding"] != "scoreline":
+            assert c["target"] == watch[c["finding"]]["target"]
+
+
+@pytest.mark.parametrize(
+    "bad_id", [None, ["press"], {"id": "press"}, 7, "missing"]
+)
+def test_malformed_finding_ids_are_rejected(match, bad_id, monkeypatch):
+    import app as app_module
+
+    findings, _, changes = _rules(match)
+    if bad_id == "missing":
+        del findings[0]["id"]
+    else:
+        findings[0]["id"] = bad_id
+    with pytest.raises(ValueError, match="ids"):
+        check_findings(findings)
+    monkeypatch.setattr(app_module, "client", None)
+    r = TestClient(app_module.app).post(
+        "/api/check", json={"findings": findings, "changes": changes}
+    )
+    assert r.status_code == 422
+
+
+def test_identical_options_are_rejected(match):
+    findings, explanations, changes = _rules(match)
+    copies = [
+        dict(c, alternative=c["action"] + " ", alternative_tradeoff="Same.")
+        for c in changes
+    ]
+    with pytest.raises(ValueError, match="repeats the recommended"):
+        check_changes(copies)
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(copies)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "offline-rules"
+    assert all(c["alternative"] != c["action"] for c in out["changes"])
+
+
+def test_unmeasured_window_is_accepted_as_null(match):
+    findings, explanations, changes = _rules(match)
+    accuracy = findings[0]["evidence"][3]
+    assert "accuracy under pressure" in accuracy["label"]
+    accuracy["before"] = None
+    assert check_findings(findings) == findings
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    accuracy["after"] = None
+    with pytest.raises(ValueError, match="evidence"):
+        check_findings(findings)
+
+
+@pytest.mark.parametrize("seed", [2, 5, 27, 41])
+def test_clips_belong_to_their_finding(seed):
+    m = generate_match(seed)
+    for focus in ("home", "away"):
+        facts = metrics.half_time_facts(m)
+        for f in tactics_offline(facts, m, focus):
+            moments = metrics.moments_for_finding(f, facts["key_moments"])
+            assert len(moments) <= metrics.MOMENTS_PER_FINDING
+            for c in moments:
+                if f["id"] in ("press", "threat"):
+                    assert c["minute"] >= f["minute"]
+                if f["id"] == "threat":
+                    assert c["team"] == f["team"]
+                if f["id"] == "scoreline":
+                    assert c["kind"] in ("goal", "big_chance_missed")
+
+
+def test_evidence_status_boundaries():
+    floor = metrics.MIN_RATE_EVENTS
+    status = metrics.evidence_status
+    assert status(1.0, 2.0, "below", floor - 1, floor) == "insufficient"
+    assert status(None, 2.0, "below", 50, floor) == "insufficient"
+    assert status(1.0, 2.0, "below", floor, floor) == "met"
+    assert status(2.0, 2.0, "below", floor, floor) == "not_met"
+    assert status(2.0, 2.0, "at_least", floor, floor) == "met"
+    # Within one standard error of the target is too close to call.
+    assert status(1.9, 2.0, "below", floor, floor, se=0.2) == "too_close"
+    assert status(1.7, 2.0, "below", floor, floor, se=0.2) == "met"
+    assert status(2.3, 2.0, "below", floor, floor, se=0.2) == "not_met"
+    assert metrics.rate_se(20, 15) == pytest.approx(20**0.5 / 15)
+
+
+def test_threat_channels_without_threat_is_none(match):
+    assert metrics.threat_channels([], "home") == {
+        "left": None,
+        "centre": None,
+        "right": None,
+    }
+    assert metrics.threat_passes([], "home") == 0
+    # No evidence can never pass a "share below 40%" target.
+    assert (
+        metrics.evidence_status(None, 40, "below", 0, metrics.MIN_SHARE_PASSES)
+        == "insufficient"
+    )
+    findings, _, _ = _rules(match)
+    findings[1]["evidence"][0]["value"] = {
+        "left": None,
+        "centre": None,
+        "right": None,
+    }
+    assert check_findings(findings) == findings
+
+
+def _check(match, focus, **kwargs):
+    briefing = asyncio.run(half_time_briefing(match, focus=focus))
+    out = asyncio.run(
+        second_half_check(
+            match,
+            findings=briefing["findings"],
+            changes=briefing["changes"],
+            focus=focus,
+            **kwargs,
+        )
+    )
+    return briefing, {c["finding"]: c for c in out["checks"]}, out
+
+
+def test_seed_27_check_statuses(match):
+    _, home, _ = _check(match, "home")
+    # 20 own-half losses in 15 minutes: 1.33 against under 0.84, clear miss.
+    assert (home["press"]["n"], home["press"]["value"]) == (20, 1.33)
+    assert home["press"]["status"] == "not_met"
+    assert home["press"]["baseline"] == 1.48
+    # Two Northgate shots cannot judge an xG target either way.
+    assert home["scoreline"]["n"] == 2
+    assert home["scoreline"]["status"] == "insufficient"
+    assert home["threat"]["policy"] == "proposed limit, not validated"
+    # Calls against the focus team carry a cost check, not a verdict.
+    guard = home["press"]["guardrail"]
+    assert guard and "status" not in guard and guard["enough"]
+    assert home["scoreline"]["guardrail"] is None
+    _, away, _ = _check(match, "away")
+    # The same 1.33 against "at least 1.48" sits inside one standard error.
+    assert away["press"]["value"] == 1.33 and away["press"]["target"] == 1.48
+    assert away["press"]["status"] == "too_close"
+
+
+def test_briefing_changes_carry_target_and_rules_text(match):
+    out = asyncio.run(half_time_briefing(match, focus="away"))
+    for c in out["changes"]:
+        assert c["target"]["id"] == f"{c['finding']}.away.v1"
+        assert c["target"]["text"] == c["watch"]
+        assert c["rules"]["source"] == "rules"
+        assert c["best_when"] and c["alternative_best_when"]
+        assert c["rules"]["alternative"] and c["rules"]["tell_apart"]
+
+
+def test_check_decisions(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "client", None)
+    c = TestClient(app_module.app)
+    b = c.get("/api/briefing", params={"focus": "home"}).json()
+    body = {
+        "focus": "home",
+        "findings": b["findings"],
+        "changes": b["changes"],
+    }
+    decisions = {
+        "press": {
+            "option": "b",
+            "status": "adopted",
+            "implemented": True,
+            "target_id": "press.home.v1",
+        },
+        "threat": {"option": None, "status": "deferred"},
+    }
+    r = c.post("/api/check", json=body | {"decisions": decisions})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["choices"] == {"press": "b", "threat": "a", "scoreline": "a"}
+    assert out["decisions"]["press"]["implemented"] is True
+    assert out["decisions"]["threat"]["target_id"] == "threat.home.v1"
+    # A target adopted for another focus is not the one this check measures.
+    stale = {"press": dict(decisions["press"], target_id="press.away.v1")}
+    r = c.post("/api/check", json=body | {"decisions": stale})
+    assert r.status_code == 422 and "reload" in r.json()["detail"]
+    unadopted = {"press": {"option": "a", "implemented": True}}
+    r = c.post("/api/check", json=body | {"decisions": unadopted})
+    assert r.status_code == 422
+    r = c.post(
+        "/api/check", json=body | {"decisions": {"press": {"status": "done"}}}
+    )
+    assert r.status_code == 422
+
+
+def test_scoreline_naming_the_opponent_is_checked_as_xg(match, monkeypatch):
+    import app as app_module
+
+    findings, explanations, changes = _rules(match)
+    findings[2]["team"] = "away"
+    monkeypatch.setattr(app_module, "client", None)
+    r = TestClient(app_module.app).post(
+        "/api/check", json={"findings": findings, "changes": changes}
+    )
+    assert r.status_code == 200
+    score = r.json()["checks"][2]
+    assert score["finding"] == "scoreline" and "xG" in score["label"]
+    # The same finding accepted from a model reply checks without error.
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    assert out["findings"][2]["team"] == "away"
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    assert check["checks"][2]["unit"].startswith("shots by")
+
+
+SEED_5 = 5
+
+
+@pytest.fixture(scope="module")
+def match5():
+    return generate_match(SEED_5)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"option": None, "status": "rejected"},
+        {"option": "b", "status": "deferred"},
+        {"option": "a", "status": "open"},
+        {"option": None, "status": "open"},
+    ],
+)
+def test_calls_not_adopted_get_no_option_advice(match5, record):
+    findings, _, changes = _rules(match5)
+    decisions = {f: dict(record) for f in ("press", "threat", "scoreline")}
+    out = asyncio.run(
+        second_half_check(
+            match5, findings=findings, changes=changes, decisions=decisions
+        )
+    )
+    checks = {c["finding"]: c for c in out["checks"]}
+    # Seed 5, home: the threat target is met (0.22 against at least 0.22).
+    assert checks["threat"]["status"] == "met"
+    for v in out["verdicts"]:
+        assert v["next"] == "review"
+        assert v["verdict"].startswith("Monitoring only")
+        assert "option" not in v["verdict"].replace("no option adopted", "")
+        assert not checks[v["finding"]]["adopted"]
+
+
+def test_adopted_call_keeps_and_unconfirmed_is_flagged(match5, monkeypatch):
+    import app as app_module
+
+    findings, _, changes = _rules(match5)
+    decisions = {"threat": {"option": "b", "status": "adopted"}}
+    out = asyncio.run(
+        second_half_check(
+            match5, findings=findings, changes=changes, decisions=decisions
+        )
+    )
+    v = {x["finding"]: x for x in out["verdicts"]}
+    checks = {c["finding"]: c for c in out["checks"]}
+    assert v["threat"]["next"] == "keep"
+    assert changes[1]["alternative"] in v["threat"]["verdict"]
+    assert checks["threat"]["implemented"] is False
+    # Calls left out of the record are open, so monitoring only.
+    assert v["press"]["verdict"].startswith("Monitoring only")
+    # The model may not say keep for a call that was not adopted.
+    keep_all = [
+        {"finding": f, "verdict": "Keep it.", "next": "keep"}
+        for f in ("press", "threat", "scoreline")
+    ]
+    with pytest.raises(ValueError, match="adopted target is met"):
+        from halftime.agents import check_verdicts as cv
+
+        cv(keep_all, out["checks"])
+    client = ScriptedClient([json.dumps(keep_all)])
+    out = asyncio.run(
+        second_half_check(
+            match5,
+            findings=findings,
+            changes=changes,
+            decisions={"press": {"option": None, "status": "rejected"}},
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "offline-rules"
+    assert "adopted target is met" in out["trace"][1]["note"]
+    # Through the API: adopting or confirming needs an option.
+    monkeypatch.setattr(app_module, "client", None)
+    c = TestClient(app_module.app)
+    body = {"seed": SEED_5, "findings": findings, "changes": changes}
+    bad = {"press": {"status": "adopted", "implemented": True}}
+    r = c.post("/api/check", json=body | {"decisions": bad})
+    assert r.status_code == 422 and "needs an option" in r.json()["detail"]
+    rejected = {
+        f: {"option": None, "status": "rejected"}
+        for f in ("press", "threat", "scoreline")
+    }
+    r = c.post("/api/check", json=body | {"decisions": rejected})
+    assert r.status_code == 200
+    assert all(x["next"] == "review" for x in r.json()["verdicts"])
+
+
+def test_best_when_travels_with_its_option(match):
+    findings, explanations, changes = _rules(match)
+    swapped = [
+        dict(
+            c,
+            action=c["alternative"],
+            tradeoff=c["alternative_tradeoff"],
+            best_when=c["alternative_best_when"],
+            alternative=c["action"],
+            alternative_tradeoff=c["tradeoff"],
+            alternative_best_when=c["best_when"],
+        )
+        for c in changes
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(swapped)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "ScriptedClient"
+    for got, rule in zip(out["changes"], changes, strict=True):
+        assert got["action"] == rule["alternative"]
+        assert got["best_when"] == rule["alternative_best_when"]
+        assert got["alternative_best_when"] == rule["best_when"]
+        assert "best_when" not in got["rules"]
+    # A coach reply without best-when falls back to the rules coach.
+    bare = [
+        {k: v for k, v in c.items() if "best_when" not in k} for c in changes
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(bare)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "offline-rules"
+    assert all(c["best_when"] for c in out["changes"])
+
+
+def test_display_rule():
+    d = metrics.display
+    assert d("pass_accuracy", 35 / 44) == "79.5%"
+    assert d("pass_accuracy", 0.789474) == "78.9%"
+    assert d("possession_pct", 52.35) == "52.4%"
+    assert d("xg", 0.125) == "0.13" and d("xg", 0.4) == "0.40"
+    assert d("xg", 0) == "0.00" and d("shots", 0) == "0"
+    assert d("xt_created", 1.165) == "1.165"
+    # A tiny positive value never looks like a measured zero.
+    assert d("xt_created", 0.0004) == "<0.001"
+    assert d("ppda", None) == "n/a"
+    assert d("top_sprint_kmh", 31.04) == "31.0 km/h"
+    assert d("shots", 4.25, kind="mean") == "4.3"
+    assert d("rate_min", 1.475) == "1.48/min"
+    assert d("unknown_key", 3.14159) == "3.14159"
+
+
+def test_page_formatter_matches_python():
+    import re
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    page = Path(__file__).parents[1].joinpath("static", "index.html")
+    src = re.search(
+        r"// fmt-start.*?// fmt-end", page.read_text(), re.S
+    ).group(0)
+    cases = [
+        ("pass_accuracy", 35 / 44, None),
+        ("pass_accuracy", 0.795, None),
+        ("pass_accuracy", None, None),
+        ("xg", 0.125, None),
+        ("xg", 1.005, None),
+        ("xg", 0, None),
+        ("xt_created", 0.0004, None),
+        ("xt_created", 1.1655, None),
+        ("possession_pct", 52.35, None),
+        ("shots", 4.25, "mean"),
+        ("turnovers_in_own_half", 1.475, "rate_10"),
+        ("rate_min", 0.845, None),
+        ("ppda", 7.25, None),
+        ("top_sprint_kmh", 33.35, None),
+    ]
+    script = (
+        src
+        + f"\nconst F = {json.dumps(metrics.formats())};"
+        + f"\nconst cases = {json.dumps(cases)};"
+        + "\nconsole.log(JSON.stringify(cases.map(([k, v, kind]) =>"
+        + " fmtWith(F, k, v, kind || undefined))));"
+    )
+    out = subprocess.run(
+        [node, "-e", script], capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        metrics.display(k, v, kind) for k, v, kind in cases
+    ]
+
+
+def test_player_card_splits_fouls_from_tackles(match):
+    ev = metrics.window(match["events"])
+    stats = {p["name"]: p for p in metrics.player_stats(ev, match).values()}
+    navarro = stats["Navarro"]
+    assert (
+        navarro["tackles"] + navarro["interceptions"],
+        navarro["fouls"],
+    ) == (
+        10,
+        1,
+    )
+    # The broad count PPDA relies on still includes the foul.
+    assert navarro["defensive_actions"] == 11
+    for p in stats.values():
+        assert p["defensive_actions"] == (
+            p["tackles"] + p["interceptions"] + p["fouls"]
+        )
+    assert stats["Haddad"]["pass_accuracy"] == pytest.approx(35 / 44, abs=1e-6)
+    # A synthetic foul counts as a foul, never as a tackle.
+    foul = dict(
+        next(e for e in ev if e["type"] == "foul"), player_id="H7", type="foul"
+    )
+    one = metrics.player_stats([foul], match)["H7"]
+    assert (one["fouls"], one["tackles"], one["interceptions"]) == (1, 0, 0)
+
+
+def test_player_totals_reconcile_with_team(match):
+    ev = metrics.window(match["events"])
+    stats = metrics.player_stats(ev, match).values()
+    for side in ("home", "away"):
+        team = metrics.team_summary(ev, side)
+        mine = [p for p in stats if p["team"] == side]
+        assert sum(p["shots"] for p in mine) == team["shots"]
+        # Rounded parts need not add exactly; allow half a unit each.
+        assert abs(sum(p["xg"] for p in mine) - team["xg"]) <= 0.005 * (
+            len(mine) + 1
+        )
+        assert abs(
+            sum(p["xt_created"] for p in mine) - team["xt_created"]
+        ) <= 0.0005 * (len(mine) + 1)
+
+
+def _card(match, name):
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            if c["name"] == name:
+                return c
+    raise KeyError(name)
+
+
+def test_insights_lead_by_role(match):
+    gk, st = _card(match, "Okafor"), _card(match, "Brennan")
+    assert gk["insight"].startswith("Okafor (GK) completed 17 of 20 passes")
+    assert "xG" not in gk["insight"]
+    assert st["insight"].startswith(
+        "Brennan (ST) recorded 1 shot worth 0.07 xG and 0 goals."
+    )
+    assert (
+        "Haddad (DM) completed 35 of 44 passes (79.5%)"
+        in (_card(match, "Haddad")["insight"])
+    )
+    assert _card(match, "Mensah")["insight"].startswith(
+        "Mensah (CB) made 3 tackles and 10 interceptions"
+    )
+    assert "xT" in _card(match, "Doyle")["insight"]  # full-back
+    assert "xT" in _card(match, "Navarro")["insight"]  # central midfield
+    assert "shot" in _card(match, "Silva")["insight"]  # winger
+    # A striker with no shots says so rather than inventing a verdict.
+    assert "recorded no shots" in _card(match, "Novak")["insight"]
+    # Every card speaks of recorded actions, not "work".
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            assert "recorded actions" in c["insight"]
+            assert "work" not in c["insight"]
+
+
+def test_insight_unknown_position_and_no_actions(match):
+    st = dict(_card(match, "Navarro")["stats"])
+    hm = _card(match, "Navarro")["heatmap"]
+    p = {"name": "Navarro", "position": "SW"}
+    text = metrics._player_insight(p, st, hm)
+    assert text.startswith("Navarro (SW) completed 26 of 35 passes")
+    empty = dict(hm, actions=0)
+    assert metrics._player_insight(p, st, empty) == (
+        "Navarro (SW) had no recorded actions in the first half."
+    )
+
+
+def test_insights_add_no_numbers(match):
+    import re
+
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            st, hm = c["stats"], c["heatmap"]
+            allowed = {
+                metrics.display(k, v)
+                for k, v in st.items()
+                if isinstance(v, int | float) and not isinstance(v, bool)
+            }
+            allowed |= {metrics.display("actions", hm["actions"])}
+            allowed |= {
+                metrics.display("share_pct", v)
+                for v in hm["thirds_pct"].values()
+            }
+            numbers = re.findall(r"\d+(?:\.\d+)?%?", c["insight"])
+            plain = {a.split(" ")[0] for a in allowed}
+            assert all(n in plain for n in numbers), (c["name"], numbers)
+
+
+def test_briefing_and_checks_carry_display_rules(match):
+    out = asyncio.run(half_time_briefing(match))
+    assert out["formats"] == metrics.formats()
+    press = out["findings"][0]
+    assert {e["metric"] for e in press["evidence"]} >= {"rate_min"}
+    bars = next(o for o in out["overlays"] if o["type"] == "stat_bars")
+    acc = {r["metric"]: r for r in bars["rows"]}
+    assert acc["xt_created"]["home_text"] == metrics.display(
+        "xt_created", out["summary"]["home"]["xt_created"]
+    )
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    threat = check["checks"][1]
+    assert threat["metric"] == "share_pct"
+    assert "61.0%" in check["verdicts"][1]["verdict"]
+    # Watch thresholds stay exactly as adopted.
+    assert threat["target"] == 40

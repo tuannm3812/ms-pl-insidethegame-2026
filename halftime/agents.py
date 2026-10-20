@@ -9,6 +9,8 @@ Five roles, run in order:
                       pressure, rhythm)
   4. Coach agent      offers two options per finding, each with its
                       trade-off (analyst mode)
+     Verifier agent   at 60', checks the chosen option against its target
+                      (analyst mode, on request)
      Fan agent        turns them into a story about your team/player
                       (fan mode)
   5. Overlay agent    renders timed, machine-readable graphics cards
@@ -26,9 +28,10 @@ import os
 import re
 import time
 from collections.abc import Callable
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Annotated, Any
 
-from . import metrics
+from . import metrics, prematch
 from .metrics import SIDES, other
 
 if TYPE_CHECKING:
@@ -257,6 +260,15 @@ def _is_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _same_text(a: str, b: str) -> bool:
+    """Two texts that differ only in case, spacing or end punctuation."""
+
+    def norm(t: str) -> str:
+        return " ".join(t.casefold().split()).rstrip(".!")
+
+    return norm(a) == norm(b)
+
+
 def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
@@ -264,10 +276,18 @@ def _is_number(value: Any) -> bool:
 def _evidence_value_ok(item: dict) -> bool:
     """Evidence is {before, after} numbers, or a value the page can show."""
     if "before" in item or "after" in item:
-        return _is_number(item.get("before")) and _is_number(item.get("after"))
+        # A window with nothing to measure (no pressured passes, say) is None
+        # in the facts; the page shows it as n/a.
+        pair = (item.get("before"), item.get("after"))
+        return any(_is_number(v) for v in pair) and all(
+            v is None or _is_number(v) for v in pair
+        )
     value = item.get("value")
     if isinstance(value, dict):
-        return bool(value) and all(_is_number(v) for v in value.values())
+        # Channel shares are None for a team with no threatening pass.
+        return bool(value) and all(
+            v is None or _is_number(v) for v in value.values()
+        )
     return _is_number(value) or _is_text(value)
 
 
@@ -275,8 +295,11 @@ def check_findings(findings: Any) -> list[dict]:
     """Reject tactics output the explainer, coach and page cannot use."""
     _require(isinstance(findings, list), "findings must be a list")
     _require(
-        sorted(f.get("id") for f in findings if isinstance(f, dict))
-        == sorted(FINDING_IDS),
+        all(
+            isinstance(f, dict) and f.get("id") in FINDING_IDS
+            for f in findings
+        )
+        and sorted(f["id"] for f in findings) == sorted(FINDING_IDS),
         f"findings need exactly the ids {FINDING_IDS}",
     )
     for f in findings:
@@ -340,8 +363,10 @@ def check_explanations(explanations: Any) -> list[dict]:
 CHANGE_TEXT_FIELDS = (
     "action",
     "tradeoff",
+    "best_when",
     "alternative",
     "alternative_tradeoff",
+    "alternative_best_when",
     "watch",
 )
 
@@ -363,8 +388,13 @@ def check_changes(changes: Any) -> list[dict]:
         )
         _require(
             all(_is_text(c.get(k)) for k in CHANGE_TEXT_FIELDS),
-            "change action, tradeoff, alternative, alternative_tradeoff "
-            "and watch must be non-empty text",
+            "change action, tradeoff, best_when, alternative, "
+            "alternative_tradeoff, alternative_best_when and watch must be "
+            "non-empty text",
+        )
+        _require(
+            not _same_text(c["action"], c["alternative"]),
+            f"{c['finding']}: alternative repeats the recommended option",
         )
     _require(
         {c["finding"] for c in changes} == set(FINDING_IDS),
@@ -422,12 +452,25 @@ def grounded_numbers(*sources: Any) -> set[float]:
 
     A share such as 0.834 may also appear as a percentage (83 or 83.4).
     """
+
+    def half_up(x: float, places: int) -> float:
+        # The page's display rule, so a number shown there is allowed too.
+        return float(
+            Decimal(str(x)).quantize(
+                Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP
+            )
+        )
+
     allowed = {float(n) for n in FREE_NUMBERS}
     for source in sources:
         for n in _numbers_in(source):
-            forms = {n, round(n), round(n, 1), round(n, 2)}
+            forms = {n} | {
+                f(n, p) for f in (round, half_up) for p in (0, 1, 2)
+            }
             if n <= 1:
-                forms |= {round(100 * n), round(100 * n, 1)}
+                forms |= {
+                    f(100 * n, p) for f in (round, half_up) for p in (0, 1)
+                }
             allowed |= {float(f) for f in forms}
     return allowed
 
@@ -451,6 +494,18 @@ def check_grounded(
 # ---------------------------------------------------------------------------
 # Rule-based versions (offline mode, and the fallback if a model reply breaks)
 # ---------------------------------------------------------------------------
+
+
+def display_summary(summary: dict) -> dict:
+    """Each side's headline stats as the page shows them, for the models."""
+    return {
+        side: {
+            k: metrics.display(k, v)
+            for k, v in stats.items()
+            if k in metrics.METRIC_FORMATS
+        }
+        for side, stats in summary.items()
+    }
 
 
 def _per_min(n: float, minutes: float) -> float:
@@ -513,6 +568,158 @@ def coach_targets(facts: dict, focus: str) -> dict:
     }
 
 
+def watch_targets(facts: dict, findings: list[dict], focus: str) -> dict:
+    """The one measurable target per finding, worded and valued in code.
+
+    The coach's Watch line and the 60' check both read from here, so the
+    target the analyst sees is exactly the target that gets checked.
+
+    Returns:
+        Finding id mapped to {id, label, target, direction, text, policy};
+        direction is "below" or "at_least". `id` names the target version,
+        so a decision record can say which target it adopted; `policy` says
+        where the threshold comes from.
+    """
+    names = facts["teams"]
+    opp = other(focus)
+    by_id = {f["id"]: f for f in findings}
+    targets = coach_targets(facts, focus)
+    watch: dict[str, dict] = {}
+
+    if by_id["press"]["team"] == opp:
+        lost = _own_half_losses(facts, focus)
+        watch["press"] = {
+            "label": f"{names[focus]} balls lost in own half per min",
+            "target": lost["before"],
+            "direction": "below",
+            "text": (
+                f"Balls lost in our half back under {lost['before']} a "
+                f"minute (now {lost['after']})."
+            ),
+            "policy": "from the first half",
+        }
+    else:
+        lost = _own_half_losses(facts, opp)
+        watch["press"] = {
+            "label": f"{names[opp]} balls lost in own half per min",
+            "target": lost["after"],
+            "direction": "at_least",
+            "text": (
+                f"Keep {names[opp]} losing the ball in their half at "
+                f"least {lost['after']} times a minute."
+            ),
+            "policy": "from the first half",
+        }
+
+    threat = by_id["threat"]
+    if threat["team"] == opp:
+        limit = targets["opponent_threat_share_in_channel_pct_below"]
+        watch["threat"] = {
+            "label": (
+                f"{names[opp]} share of threat down the {threat['channel']} %"
+            ),
+            "target": limit,
+            "direction": "below",
+            "text": (
+                f"Their share of threat down the {threat['channel']} "
+                f"below {limit}%."
+            ),
+            "policy": "proposed limit, not validated",
+        }
+    else:
+        level = _per_10(facts["summary"][focus]["xt_created"], 45)
+        watch["threat"] = {
+            "label": f"{names[focus]} threat (xT) per 10 min",
+            "target": level,
+            "direction": "at_least",
+            "text": (
+                f"Our threat (xT) per 10 minutes stays at least {level}, "
+                "our first-half level."
+            ),
+            "policy": "from the first half",
+        }
+
+    xg = targets["opponent_second_half_xg_below"]
+    watch["scoreline"] = {
+        "label": f"{names[opp]} xG since the break",
+        "target": xg,
+        "direction": "below",
+        "text": f"Their xG for the second half under {xg}.",
+        "policy": "half the first-half xG, at least 0.3",
+    }
+    for fid, w in watch.items():
+        w["id"] = target_id(fid, focus)
+    return watch
+
+
+TARGET_VERSION = "v1"
+
+
+def target_id(finding: str, focus: str) -> str:
+    """Stable reference to the Watch target for one finding and focus."""
+    return f"{finding}.{focus}.{TARGET_VERSION}"
+
+
+def _situation(finding: dict, focus: str) -> str:
+    """Whether a finding is against the focus team, for it, or either."""
+    if finding["id"] == "scoreline":
+        return "any"
+    return "against" if finding["team"] == other(focus) else "for"
+
+
+# Rules-written prompts for the analyst, not model output and not measured:
+# one alternative explanation per kind of finding and what would tell the
+# two apart.
+ALTERNATIVES = {
+    ("press", "against"): (
+        "Our build-up got worse on its own (tired legs, loose first "
+        "touches), so the losses would have risen without their press.",
+        "Whether our own-half losses come with a presser close by or not; "
+        "the clips of the losses settle it.",
+    ),
+    ("press", "for"): (
+        "They chose to go long and gave the ball away, rather than our "
+        "press forcing errors.",
+        "Whether their losses come from pressured passes; the clips of "
+        "their losses settle it.",
+    ),
+    ("threat", "against"): (
+        "They had few attacks, so a handful of passes down one channel "
+        "looks like a pattern.",
+        "How many of their threatening passes went down that channel, and "
+        "the clips.",
+    ),
+    ("threat", "for"): (
+        "Their shape leaves that channel open by design and may close it "
+        "after the break.",
+        "Whether our threat there holds once they make their next change.",
+    ),
+    ("scoreline", "any"): (
+        "The gap is a few chances either way, not a pattern of play.",
+        "The shot list and the clips of the big chances.",
+    ),
+}
+
+
+def rules_notes(findings: list[dict], focus: str) -> dict:
+    """Rules-written alternative explanation and tell-apart text per finding.
+
+    Attached after the model steps, so the explainer schema does not change
+    and the page can label this text as written by rules. When each option
+    fits ("best when") is part of the coach's output, so it always describes
+    the option it sits next to.
+    """
+    out = {}
+    for f in findings:
+        alt, tell = ALTERNATIVES[(f["id"], _situation(f, focus))]
+        out[f["id"]] = {
+            "alternative": alt,
+            "tell_apart": tell,
+            "source": "rules",
+        }
+    return out
+
+
 def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
     """Rule-based tactics agent: the three findings that decided the half."""
     tp = facts["turning_point"]
@@ -541,30 +748,36 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
             "evidence": [
                 {
                     "label": f"{names[presser]} high presses per min",
+                    "metric": "rate_min",
                     "before": b[presser]["high_presses_per_min"],
                     "after": a[presser]["high_presses_per_min"],
                 },
                 {
                     "label": f"{names[victim]} balls lost in own half per min",
+                    "metric": "rate_min",
                     **_own_half_losses(facts, victim),
                 },
                 {
                     "label": f"{names[victim]} passes made under pressure",
+                    "metric": "passes_under_pressure",
                     "before": b[victim]["passes_under_pressure"],
                     "after": a[victim]["passes_under_pressure"],
                 },
                 {
                     "label": f"{names[victim]} pass accuracy under pressure",
+                    "metric": "pass_accuracy_under_pressure",
                     "before": b[victim]["pass_accuracy_under_pressure"],
                     "after": a[victim]["pass_accuracy_under_pressure"],
                 },
                 {
-                    "label": f"{names[victim]} possession %",
+                    "label": f"{names[victim]} possession",
+                    "metric": "possession_pct",
                     "before": b[victim]["possession_pct"],
                     "after": a[victim]["possession_pct"],
                 },
                 {
                     "label": f"{names[victim]} threat (xT) per 10 min",
+                    "metric": "rate_10",
                     "before": _per_10(
                         b[victim]["xt_created"], b[victim]["minutes"]
                     ),
@@ -580,7 +793,8 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
     # 2. Where the dominant team's threat comes from since the turning point.
     dominant = max(SIDES, key=lambda s: a[s]["xt_created"] + a[s]["xg"])
     channels = metrics.threat_channels(after_events, dominant)
-    channel = max(channels, key=channels.get)
+    channel = max(channels, key=lambda k: channels[k] or 0.0)
+    share = channels[channel]
     after_players = metrics.player_stats(after_events, match)
     creators = sorted(
         (p for p in after_players.values() if p["team"] == dominant),
@@ -593,7 +807,10 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
             "team": dominant,
             "title": (
                 f"{names[dominant]} are getting in down the {channel} "
-                f"({channels[channel]:.0f}% of their threat since {t}')"
+                f"({metrics.display('share_pct', share)} of their threat "
+                f"since {t}')"
+                if share is not None
+                else f"{names[dominant]} have no threatening pass since {t}'"
             ),
             "evidence": [
                 {
@@ -601,13 +818,16 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
                         f"{names[dominant]} xT share by channel since {t}'"
                     ),
                     "value": channels,
+                    "metric": "share_pct",
                 },
                 {
                     "label": "Main creators (xT since turning point)",
                     "value": {p["name"]: p["xt_created"] for p in creators},
+                    "metric": "xt_created",
                 },
                 {
                     "label": f"{names[dominant]} xT before vs after",
+                    "metric": "xt_created",
                     "before": b[dominant]["xt_created"],
                     "after": a[dominant]["xt_created"],
                 },
@@ -703,10 +923,13 @@ def explain_offline(
             )
             why = (
                 f"{names[p]} started hunting the ball in {names[v]}'s half. "
-                f"{names[v]} went from losing it there {lost['before']} to "
-                f"{lost['after']} times a minute. "
-                f"Possession changed hands {chaos_before} times a minute "
-                f"before {t}' and {chaos_after} after, "
+                f"{names[v]} went from losing it there "
+                f"{metrics.display('rate', lost['before'])} to "
+                f"{metrics.display('rate', lost['after'])} times a minute. "
+                "Possession changed hands "
+                f"{metrics.display('rate', chaos_before)} times a minute "
+                f"before {t}' and {metrics.display('rate', chaos_after)} "
+                "after, "
                 f"so {tempo}, but the losses moved closer to {names[v]}'s "
                 "goal. That is why the press "
                 f"turns into chances rather than just pressure."
@@ -759,7 +982,6 @@ def coach_offline(
     findings: list[dict], facts: dict, match: dict, focus: str
 ) -> list[dict]:
     """Rule-based coach agent: three second-half changes."""
-    names = facts["teams"]
     opp = other(focus)
     squad = {p["position"]: p for p in match["teams"][focus]["players"]}
     fastest = max(
@@ -771,11 +993,9 @@ def coach_offline(
         key=lambda p: p["top_speed_kmh"],
     )
     by_id = {f["id"]: f for f in findings}
-    targets = coach_targets(facts, focus)
     changes = []
 
     press = by_id["press"]
-    lost = _own_half_losses(facts, other(press["team"]))
     if press["team"] == opp:
         changes.append(
             {
@@ -791,6 +1011,10 @@ def coach_offline(
                     "Going longer gives up some possession, so expect fewer "
                     "spells of control."
                 ),
+                "best_when": (
+                    "our quick forward can run behind a back line that "
+                    "pushes up"
+                ),
                 "alternative": (
                     f"Play through it: {squad['GK']['name']} waits for "
                     f"{squad['CM']['name']} to drop in and we play short "
@@ -800,9 +1024,9 @@ def coach_offline(
                     "Keeps the ball but one loose pass near our box is a "
                     "big chance for them."
                 ),
-                "watch": (
-                    f"Balls lost in our half back under {lost['before']} a "
-                    f"minute (now {lost['after']})."
+                "alternative_best_when": (
+                    "the keeper and centre-backs are calm on the ball under "
+                    "pressure"
                 ),
             }
         )
@@ -819,6 +1043,7 @@ def coach_offline(
                     "Pressing for another 45 minutes costs legs; the front "
                     "three may need changing before the end."
                 ),
+                "best_when": "the front line still has the legs to press",
                 "alternative": (
                     "Drop into a mid-block after the hour and keep the "
                     "front line fresh for counters."
@@ -826,9 +1051,8 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Gives them more of the ball and time to build."
                 ),
-                "watch": (
-                    f"Keep {names[opp]} losing the ball in their half at "
-                    f"least {lost['after']} times a minute."
+                "alternative_best_when": (
+                    "after the hour, or when the lead needs protecting"
                 ),
             }
         )
@@ -855,6 +1079,9 @@ def coach_offline(
                     f"Pulling {helper} back costs us an outlet on that side "
                     "when we win the ball."
                 ),
+                "best_when": (
+                    "their threat really does come from that one channel"
+                ),
                 "alternative": (
                     f"Stay compact instead: {squad['DM']['name']} sits in "
                     f"front of the back four so the {threat['channel']} "
@@ -863,10 +1090,9 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Leaves the full-backs one-on-one if they switch play."
                 ),
-                "watch": (
-                    f"Their share of threat down the {threat['channel']} "
-                    "below "
-                    f"{targets['opponent_threat_share_in_channel_pct_below']}%."
+                "alternative_best_when": (
+                    "they switch play often, so a winger cannot keep "
+                    "tracking back"
                 ),
             }
         )
@@ -884,6 +1110,7 @@ def coach_offline(
                     "If they double up there, our threat drops until we "
                     "switch sides."
                 ),
+                "best_when": "the channel stays open after the break",
                 "alternative": (
                     "Switch the point of attack early and often so their "
                     "cover never settles on one side."
@@ -891,7 +1118,7 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Longer switches are harder passes and some will be lost."
                 ),
-                "watch": "Our xT per minute stays at first-half levels.",
+                "alternative_best_when": "they shift their cover to that side",
             }
         )
 
@@ -917,6 +1144,10 @@ def coach_offline(
         alternative_tradeoff = (
             "Uses a substitution early and unsettles the back line."
         )
+        best_when = "they are still useful on the ball with support"
+        alternative_best_when = (
+            "they keep losing it under pressure even with support"
+        )
     else:
         action = (
             "Get one more runner into the box: our best chances came from "
@@ -927,6 +1158,8 @@ def coach_offline(
             "Keep the shape and work the ball to the byline for cut-backs."
         )
         alternative_tradeoff = "Slower, and fewer shots if they sit deep."
+        best_when = "our chances keep coming from close range"
+        alternative_best_when = "they sit deep and leave the byline open"
     if leading and sum(momentum) < 0:
         action += (
             f" We lead but lost the last {MOMENTUM_WINDOW_MIN} minutes, so "
@@ -937,14 +1170,15 @@ def coach_offline(
             "finding": "scoreline",
             "action": action,
             "tradeoff": tradeoff,
+            "best_when": best_when,
             "alternative": alternative,
             "alternative_tradeoff": alternative_tradeoff,
-            "watch": (
-                "Their xG for the second half under "
-                f"{targets['opponent_second_half_xg_below']}."
-            ),
+            "alternative_best_when": alternative_best_when,
         }
     )
+    watch = watch_targets(facts, findings, focus)
+    for c in changes:
+        c["watch"] = watch[c["finding"]]["text"]
     return changes
 
 
@@ -1004,7 +1238,8 @@ def fan_offline(
         if p:
             bits = [
                 f"{p['passes']} passes "
-                f"({round(100 * (p['pass_accuracy'] or 0))}% accurate)"
+                f"({metrics.display('pass_accuracy', p['pass_accuracy'])} "
+                "accurate)"
             ]
             if p["goals"]:
                 bits.append(
@@ -1013,16 +1248,20 @@ def fan_offline(
             if p["shots"]:
                 bits.append(
                     f"{p['shots']} shot{'s' if p['shots'] > 1 else ''} worth "
-                    f"{p['xg']} xG"
+                    f"{metrics.display('xg', p['xg'])} xG"
                 )
             if p["xt_created"] >= 0.1:
                 bits.append("one of the most dangerous passers on the pitch")
-            if p["defensive_actions"]:
+            if p["tackles"] or p["interceptions"]:
                 bits.append(
-                    f"{p['defensive_actions']} tackles and interceptions"
+                    f"{p['tackles']} tackles and {p['interceptions']} "
+                    "interceptions"
                 )
             if p["top_sprint_kmh"]:
-                bits.append(f"top sprint {p['top_sprint_kmh']} km/h")
+                bits.append(
+                    "top sprint "
+                    + metrics.display("top_sprint_kmh", p["top_sprint_kmh"])
+                )
             spotlight = {
                 "player": p["name"],
                 "line": f"{p['name']}: " + ", ".join(bits) + ".",
@@ -1067,27 +1306,24 @@ def overlays(
             "duration_s": 8,
             "type": "stat_bars",
             "title": "First half",
+            # Machine-readable values plus the display text, so a
+            # broadcast graphic shows the same digits as the page.
             "rows": [
                 {
-                    "label": "Possession %",
-                    "home": s["home"]["possession_pct"],
-                    "away": s["away"]["possession_pct"],
-                },
-                {
-                    "label": "xG",
-                    "home": s["home"]["xg"],
-                    "away": s["away"]["xg"],
-                },
-                {
-                    "label": "Threat (xT)",
-                    "home": s["home"]["xt_created"],
-                    "away": s["away"]["xt_created"],
-                },
-                {
-                    "label": "Shots",
-                    "home": s["home"]["shots"],
-                    "away": s["away"]["shots"],
-                },
+                    "label": label,
+                    "metric": key,
+                    **{side: s[side][key] for side in SIDES},
+                    **{
+                        f"{side}_text": metrics.display(key, s[side][key])
+                        for side in SIDES
+                    },
+                }
+                for label, key in (
+                    ("Possession", "possession_pct"),
+                    ("xG", "xg"),
+                    ("Threat (xT)", "xt_created"),
+                    ("Shots", "shots"),
+                )
             ],
         },
         {
@@ -1140,7 +1376,9 @@ any other number is discarded. Return a JSON list; each item needs id,
 concept, team ("home" or "away"), title (one sentence), evidence (list of
 {label, before, after} or {label, value}), minute, and for "threat" also
 channel ("left", "centre" or "right") and creators, for "scoreline" also
-goals_minus_xg and weak_link (a player name or null).
+goals_minus_xg and weak_link (a player name or null). When a number has a
+display form under "display", quote that form (for example a pass accuracy of
+0.789 as 78.9%).
 """
 
 EXPLAINER_INSTRUCTIONS = """\
@@ -1149,7 +1387,8 @@ finding, say in two or three plain sentences why it matters to the result,
 using one lens: "Control vs chaos", "Game rhythm", "Pressure" or "Chance
 quality". Return a JSON list of {id, concept, why_it_matters}. Quote numbers
 only as they appear in the findings or "measurements"; a reply with any other
-number is discarded.
+number is discarded. When a number has a display form under "display", quote
+that form (for example a pass accuracy of 0.789 as 78.9%).
 """
 
 COACH_INSTRUCTIONS = """\
@@ -1158,15 +1397,17 @@ Turn the findings into exactly three changes for the second half, one per
 finding. You advise, the head coach decides, so each change offers two
 options with their trade-off rather than one order. Each option names real
 players from the squad list and is something a coach can say in the dressing
-room. Return a JSON list of {finding, action, tradeoff, alternative,
-alternative_tradeoff, watch}, all strings. finding is the id of the finding
-the change answers ("press", "threat" or "scoreline"), not its title. action
-is the option you recommend and tradeoff its cost; alternative is the other
-option and alternative_tradeoff its cost. watch is one sentence naming a
-measurable target for the second half, taken from "targets", that tells the
-coach whether either option worked. Quote numbers only as they appear in the
-input; never calculate or invent one. A reply with any other number is
-discarded.
+room. Return a JSON list of {finding, action, tradeoff, best_when,
+alternative, alternative_tradeoff, alternative_best_when, watch}, all strings.
+finding is the id of the finding the change answers ("press", "threat" or
+"scoreline"), not its title. action is the option you recommend, tradeoff its
+cost and best_when the situation it fits best; alternative is the other
+option, alternative_tradeoff its cost and alternative_best_when the situation
+it fits best. Each best_when describes its own option, in a short phrase.
+alternative must be a genuinely different option from action. watch is copied
+exactly from "watch" for that finding, because it is the target the
+second-half check measures. Quote numbers only as they appear in the input;
+never calculate or invent one. A reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
@@ -1176,13 +1417,514 @@ If a favourite player is given, include a spotlight on them using their real
 stats. Return JSON {headline, story (list of 3 short paragraphs), spotlight
 ({player, line} or null), watch_for, language}. Quote numbers only as they
 appear in the input; never calculate or invent one. A reply with any other
-number is discarded.
+number is discarded. When a number has a display form under "display", quote
+that form (for example a pass accuracy of 0.789 as 78.9%).
 """
+
+
+# ---------------------------------------------------------------------------
+# The 60' check: did the chosen option do what the coach asked to watch?
+# ---------------------------------------------------------------------------
+
+CHECK_MINUTE = 60
+OPTIONS = ("a", "b")
+
+
+def second_half_events(events: list[dict], until: int) -> list[dict]:
+    """Second-half events before `until`, dropping first-half stoppage time."""
+    return [e for e in events if e["half"] == 2 and e["minute"] < until]
+
+
+def check_targets(
+    facts: dict,
+    match: dict,
+    findings: list[dict],
+    focus: str,
+    until: int = CHECK_MINUTE,
+) -> list[dict]:
+    """Measure each Watch target on the second half so far, in code.
+
+    Targets come from `watch_targets`, the same place the coach's Watch line
+    is written from, so the check measures exactly what the analyst was shown.
+    Each check also carries how many events it rests on, the value from the
+    turning point to half-time, a status under the proposed evidence policy
+    and, for a call against the focus team, a cost guardrail.
+    """
+    ev = second_half_events(match["events"], until)
+    late_ev = [
+        e
+        for e in metrics.window(match["events"])
+        if e["minute"] >= facts["turning_point"]["minute"]
+    ]
+    minutes = until - 45
+    opp = other(focus)
+    names = facts["teams"]
+    tp = facts["turning_point"]
+    late = tp["after"]
+    by_id = {f["id"]: f for f in findings}
+    summary = {s: metrics.team_summary(ev, s) for s in SIDES}
+    watch = watch_targets(facts, findings, focus)
+
+    def late_xt_per_10(side: str) -> float:
+        return _per_10(late[side]["xt_created"], late[side]["minutes"])
+
+    checks = []
+    for fid in FINDING_IDS:
+        f, w = by_id[fid], watch[fid]
+        label, target, direction = w["label"], w["target"], w["direction"]
+        se = None
+        if fid == "press":
+            side = focus if f["team"] == opp else opp
+            n = summary[side]["turnovers_in_own_half"]
+            value = _per_min(n, minutes)
+            unit = "balls lost in own half"
+            baseline = _per_min(
+                late[side]["turnovers_in_own_half"], late[side]["minutes"]
+            )
+            se = metrics.rate_se(n, minutes)
+            metric = "rate_min"
+            minimum = metrics.MIN_RATE_EVENTS
+            rule = (
+                f"at least {minimum} events; too close to call within one "
+                "standard error (square root of the count, per minute)"
+            )
+        elif fid == "threat" and f["team"] == opp:
+            n = metrics.threat_passes(ev, opp)
+            value = metrics.threat_channels(ev, opp)[f["channel"]]
+            unit = f"threatening passes by {names[opp]}"
+            metric = "share_pct"
+            baseline = metrics.threat_channels(late_ev, opp)[f["channel"]]
+            minimum = metrics.MIN_SHARE_PASSES
+            rule = (
+                f"at least {minimum} threatening passes; no too-close rule "
+                "for a share yet"
+            )
+        elif fid == "threat":
+            n = metrics.threat_passes(ev, focus)
+            value = _per_10(summary[focus]["xt_created"], minutes)
+            unit = "threatening passes"
+            metric = "rate_10"
+            baseline = late_xt_per_10(focus)
+            minimum = metrics.MIN_SHARE_PASSES
+            rule = (
+                f"at least {minimum} threatening passes; no too-close rule "
+                "for xT yet"
+            )
+        else:
+            n = summary[opp]["shots"]
+            value = summary[opp]["xg"]
+            # The xG target covers the whole half, so pace it to the minutes.
+            target = round(target * minutes / 45, 2)
+            label = f"{label} (target paced to {until}')"
+            unit = f"shots by {names[opp]}"
+            metric = "xg"
+            baseline = None
+            minimum = metrics.MIN_SHOTS
+            rule = (
+                f"at least {minimum} shots; the whole-half target "
+                f"{w['target']} is paced to {minutes} minutes"
+            )
+        status = metrics.evidence_status(
+            value, target, direction, n, minimum, se
+        )
+        guardrail = None
+        if fid != "scoreline" and f["team"] == opp:
+            passes = metrics.threat_passes(ev, focus)
+            guardrail = {
+                "label": f"{names[focus]} threat (xT) per 10 min",
+                "metric": "rate_10",
+                "value": _per_10(summary[focus]["xt_created"], minutes),
+                "reference": late_xt_per_10(focus),
+                "reference_label": f"{tp['minute']}' to half-time",
+                "n": passes,
+                "enough": passes >= metrics.MIN_SHARE_PASSES,
+                "why": (
+                    "Both options give something up in attack, so watch "
+                    "that our threat does not collapse."
+                ),
+            }
+        checks.append(
+            {
+                "finding": fid,
+                "target_id": w["id"],
+                "label": label,
+                "metric": metric,
+                "value": value,
+                "target": target,
+                "direction": direction,
+                "policy": w["policy"],
+                "status": status,
+                # Kept for older clients: on track means the target is met.
+                "on_track": status == "met",
+                "n": n,
+                "unit": unit,
+                "window": f"46'-{until}'",
+                "minutes": minutes,
+                "baseline": baseline,
+                "se": None if se is None else round(se, 2),
+                "rule": rule,
+                "guardrail": guardrail,
+            }
+        )
+    return checks
+
+
+NEXT_STEPS = ("keep", "review")
+
+
+def check_verdicts(
+    verdicts: Any, checks: list[dict] | None = None
+) -> list[dict]:
+    """Reject verifier output that is not one verdict per finding.
+
+    With the checks, also reject "keep" unless the target is met and the
+    call was adopted: a miss, a too-close result, thin evidence or a call
+    that was never adopted goes back to the staff for review. The wording
+    itself is not checked; the page's advice comes from the status in code.
+    """
+    _require(isinstance(verdicts, list), "verdicts must be a list")
+    _require(len(verdicts) == 3, "verdicts must be three items")
+    for v in verdicts:
+        _require(isinstance(v, dict), "each verdict must be an object")
+        _require(
+            v.get("finding") in FINDING_IDS,
+            f"verdict finding must be one of {FINDING_IDS}",
+        )
+        _require(
+            _is_text(v.get("verdict")) and v.get("next") in NEXT_STEPS,
+            "verdict needs text and next of keep or review",
+        )
+    _require(
+        {v["finding"] for v in verdicts} == set(FINDING_IDS),
+        "verdicts must cover each finding once",
+    )
+    if checks is not None:
+        by_id = {c["finding"]: c for c in checks}
+        _require(
+            all(
+                v["next"] == "review"
+                or (
+                    by_id[v["finding"]]["status"] == "met"
+                    and by_id[v["finding"]].get("adopted", True)
+                )
+                for v in verdicts
+            ),
+            "next may be keep only when an adopted target is met",
+        )
+    return verdicts
+
+
+def verify_offline(
+    checks: list[dict], changes: list[dict], choices: dict[str, str]
+) -> list[dict]:
+    """Rule-based verifier: one verdict per check, read from the numbers.
+
+    It never names the other option. A missed target goes back to the
+    staff, a too-close or thin result is not a verdict, and a call that was
+    not adopted is reported as monitoring only, with no option advice.
+    """
+    by_id = {c["finding"]: c for c in changes}
+    verdicts = []
+    for c in checks:
+        adopted = c.get("adopted", True)
+        goal = "under" if c["direction"] == "below" else "at least"
+        metric = c.get("metric", "")
+        value = metrics.display(metric, c["value"])
+        target = metrics.display(metric, c["target"])
+        measured = (
+            f"{c['label']} is {value} from {c['n']} {c['unit']} "
+            f"in {c['window']}"
+        )
+        status = c["status"]
+        if status == "insufficient":
+            text = (
+                f"Not enough evidence yet: only {c['n']} {c['unit']} in "
+                f"{c['window']}. Not a verdict; look again later."
+            )
+        elif status == "too_close":
+            text = (
+                f"Too close to call after {c['minutes']} minutes: "
+                f"{measured}, against a target of {goal} {target}. "
+                "Not a verdict yet; look again later."
+            )
+        elif status == "met":
+            text = f"Target met so far: {measured}, {goal} the {target} "
+            if adopted:
+                chosen = choices.get(c["finding"], "a")
+                option = by_id[c["finding"]]
+                picked = (
+                    option["action"]
+                    if chosen == "a"
+                    else option["alternative"]
+                )
+                text += (
+                    f"target. Keep option {chosen.upper()} under review: "
+                    f"{picked}"
+                )
+            else:
+                text += "target."
+        else:
+            text = (
+                f"Target not met: {measured}, against a target of {goal} "
+                f"{target}."
+            )
+            if adopted:
+                text += " Review it with the staff before changing anything."
+        if not adopted:
+            text = "Monitoring only, no option adopted. " + text
+        verdicts.append(
+            {
+                "finding": c["finding"],
+                "verdict": text,
+                "next": "keep" if status == "met" and adopted else "review",
+            }
+        )
+    return verdicts
+
+
+VERIFY_INSTRUCTIONS = """\
+You are the analyst checking in with the head coach at the given minute of the
+second half. For each finding you get the measurable target they were told to
+watch and the value measured so far ("checks", computed from the events), with
+its status (met, not_met, too_close or insufficient) and whether the staff
+adopted an option for it ("adopted"). "chosen_options" lists only adopted
+options. Say in one or two plain sentences what the check shows. A too_close
+or insufficient result is not a verdict: say so, and that it needs another
+look later. For a call that was not adopted, report the numbers as monitoring
+only and give no option advice. Never tell the coach to switch to the other
+option; a missed target goes back to the staff to review. Return a JSON list
+of {finding, verdict, next}, where next is "keep" only when an adopted target
+is met and "review" otherwise. Quote numbers only as they appear in "checks";
+never calculate or invent one. A reply with any other number is discarded.
+"""
+
+
+DECISION_STATUSES = ("open", "adopted", "deferred", "rejected")
+
+
+def check_decisions(decisions: Any, watch: dict) -> dict[str, dict]:
+    """Validate the analyst's decision record against the current targets.
+
+    Raises:
+        ValueError: A decision names an unknown finding, option or status,
+            adopts or confirms a call without naming an option, claims
+            implementation without adoption, or adopted a target that is
+            not the one the check would measure.
+    """
+    if not isinstance(decisions, dict):
+        raise ValueError("decisions must be an object")
+    out = {}
+    for fid, d in decisions.items():
+        if fid not in FINDING_IDS or not isinstance(d, dict):
+            raise ValueError(f"decision for unknown finding {fid!r}")
+        option, status = d.get("option"), d.get("status", "open")
+        if option is not None and option not in OPTIONS:
+            raise ValueError(f"{fid}: option must be a, b or null")
+        if status not in DECISION_STATUSES:
+            raise ValueError(
+                f"{fid}: status must be one of {DECISION_STATUSES}"
+            )
+        implemented = bool(d.get("implemented", False))
+        if implemented and status != "adopted":
+            raise ValueError(f"{fid}: only an adopted option can be in place")
+        if status == "adopted" and option is None:
+            raise ValueError(f"{fid}: adopting a call needs an option")
+        tid = d.get("target_id")
+        if tid is not None and tid != watch[fid]["id"]:
+            raise ValueError(
+                f"{fid}: target {tid!r} is not the current target "
+                f"{watch[fid]['id']!r}; reload the briefing"
+            )
+        out[fid] = {
+            "option": option,
+            "status": status,
+            "implemented": implemented,
+            "target_id": watch[fid]["id"],
+        }
+    return out
+
+
+async def second_half_check(
+    match: dict,
+    *,
+    findings: list[dict],
+    changes: list[dict],
+    focus: str = "home",
+    choices: dict[str, str] | None = None,
+    decisions: dict[str, dict] | None = None,
+    until: int = CHECK_MINUTE,
+    client: BaseChatClient | None = None,
+) -> dict:
+    """Check the half-time calls against the second half so far.
+
+    The numbers come from code; the verifier agent only words the verdict
+    and falls back to rules like every other agent. When the analyst sends
+    a decision record, only adopted calls count as chosen options, every
+    other call is monitoring only, and each target must still be the one
+    the check measures. Without a record, every call counts as adopted with
+    the option in `choices` (default a), as older clients expect.
+    """
+    facts = metrics.half_time_facts(match)
+    watch = watch_targets(facts, findings, focus)
+    record = check_decisions(decisions, watch) if decisions is not None else {}
+    if decisions is not None:
+        for f in FINDING_IDS:
+            record.setdefault(
+                f,
+                {
+                    "option": None,
+                    "status": "open",
+                    "implemented": False,
+                    "target_id": watch[f]["id"],
+                },
+            )
+    adopted = {
+        f: decisions is None or record[f]["status"] == "adopted"
+        for f in FINDING_IDS
+    }
+    picked = {f: d["option"] for f, d in record.items() if d["option"]}
+    choices = {
+        f: picked.get(f) or (choices or {}).get(f, "a") for f in FINDING_IDS
+    }
+    _require(
+        all(c in OPTIONS for c in choices.values()),
+        "each choice must be a or b",
+    )
+    trace: list[dict] = []
+    started = time.perf_counter()
+    checks = check_targets(facts, match, findings, focus, until)
+    for c in checks:
+        c["adopted"] = adopted[c["finding"]]
+        c["implemented"] = (
+            record[c["finding"]]["implemented"] if record else None
+        )
+    _step(
+        trace,
+        "stats",
+        "deterministic",
+        started,
+        f"{len(second_half_events(match['events'], until))} events "
+        f"to {until}'",
+    )
+    by_id = {c["finding"]: c for c in changes}
+    chosen = {
+        f: by_id[f]["action"] if choices[f] == "a" else by_id[f]["alternative"]
+        for f in FINDING_IDS
+        if adopted[f]
+    }
+    verdicts = await _model_or_rules(
+        client,
+        match,
+        trace,
+        "verifier",
+        VERIFY_INSTRUCTIONS,
+        {
+            "focus_team": facts["teams"][focus],
+            "minute": until,
+            "chosen_options": chosen,
+            "decisions": {
+                f: {
+                    "status": d["status"],
+                    "implemented": d["implemented"],
+                }
+                for f, d in record.items()
+            },
+            "watch": {f: w["text"] for f, w in watch.items()},
+            "checks": checks,
+            "display": {
+                c["finding"]: {
+                    k: metrics.display(c["metric"], c[k])
+                    for k in ("value", "target")
+                }
+                for c in checks
+            },
+        },
+        lambda: verify_offline(checks, changes, choices),
+        lambda out: check_verdicts(out, checks),
+    )
+    return {
+        "match_id": facts["match_id"],
+        "focus": focus,
+        "focus_team": facts["teams"][focus],
+        "until": until,
+        "score": {
+            s: facts["score"][s]
+            + sum(
+                1
+                for e in second_half_events(match["events"], until)
+                if e["type"] == "goal" and e["team"] == s
+            )
+            for s in SIDES
+        },
+        "choices": choices,
+        "decisions": record,
+        "checks": checks,
+        "verdicts": verdicts,
+        "trace": trace,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
+
+def _step(
+    trace: list[dict], agent: str, backend: str, started: float, note: str = ""
+) -> None:
+    """Append one agent step to the briefing trace."""
+    trace.append(
+        {
+            "agent": agent,
+            "backend": backend,
+            "ms": round(1000 * (time.perf_counter() - started)),
+            "note": note,
+        }
+    )
+
+
+async def _model_or_rules(
+    client: BaseChatClient | None,
+    match: dict,
+    trace: list[dict],
+    agent: str,
+    instructions: str,
+    payload: dict,
+    fallback: Callable[[], Any],
+    check: Callable[[Any], Any],
+    use_tools: bool = False,
+    skip: tuple[str, ...] = (),
+) -> Any:
+    """Run a model-backed agent, or its rules when there is no client.
+
+    A reply that fails its shape or grounding check also falls back, and the
+    trace records why, so the output shape never changes.
+    """
+    started = time.perf_counter()
+    if client is not None:
+        try:
+            seen: list[str] = []
+            tools = build_tools(match, seen) if use_tools else None
+            out = await _run_agent(client, agent, instructions, payload, tools)
+            check(out)
+            allowed = grounded_numbers(payload, *(json.loads(t) for t in seen))
+            check_grounded(out, allowed, skip)
+            _step(trace, agent, backend_name(client), started)
+            return out
+        # A broken reply should not break the show.
+        except Exception as exc:
+            _step(
+                trace,
+                agent,
+                "offline-rules",
+                started,
+                f"model step failed ({type(exc).__name__}: "
+                f"{str(exc)[:120]}), used rules",
+            )
+            return fallback()
+    out = fallback()
+    _step(trace, agent, "offline-rules", started)
+    return out
 
 
 async def half_time_briefing(
@@ -1200,55 +1942,13 @@ async def half_time_briefing(
     is configured or a reply cannot be parsed, so the output shape never
     changes.
     """
-    trace = []
+    trace: list[dict] = []
 
-    def step(agent: str, backend: str, started: float, note: str = ""):
-        trace.append(
-            {
-                "agent": agent,
-                "backend": backend,
-                "ms": round(1000 * (time.perf_counter() - started)),
-                "note": note,
-            }
-        )
+    def step(agent: str, backend: str, started: float, note: str = "") -> None:
+        _step(trace, agent, backend, started, note)
 
-    async def model_or_rules(
-        agent: str,
-        instructions: str,
-        payload: dict,
-        fallback: Callable[[], Any],
-        check: Callable[[Any], Any],
-        use_tools: bool = False,
-        skip: tuple[str, ...] = (),
-    ) -> Any:
-        started = time.perf_counter()
-        if client is not None:
-            try:
-                seen: list[str] = []
-                tools = build_tools(match, seen) if use_tools else None
-                out = await _run_agent(
-                    client, agent, instructions, payload, tools
-                )
-                check(out)
-                allowed = grounded_numbers(
-                    payload, *(json.loads(t) for t in seen)
-                )
-                check_grounded(out, allowed, skip)
-                step(agent, backend_name(client), started)
-                return out
-            # A broken reply should not break the show.
-            except Exception as exc:
-                step(
-                    agent,
-                    "offline-rules",
-                    started,
-                    f"model step failed ({type(exc).__name__}: "
-                    f"{str(exc)[:120]}), used rules",
-                )
-                return fallback()
-        out = fallback()
-        step(agent, "offline-rules", started)
-        return out
+    async def model_or_rules(*args: Any, **kwargs: Any) -> Any:
+        return await _model_or_rules(client, match, trace, *args, **kwargs)
 
     started = time.perf_counter()
     facts = metrics.half_time_facts(match)
@@ -1272,6 +1972,7 @@ async def half_time_briefing(
         )
     }
     slim["focus_team"] = focus
+    slim["display"] = display_summary(facts["summary"])
     # Code-computed evidence for each finding, so the model can quote
     # measured rates and shares instead of working them out.
     rules_findings = tactics_offline(facts, match, focus)
@@ -1324,6 +2025,12 @@ async def half_time_briefing(
         "shots": facts["shots"],
         "findings": findings,
         "explanations": explanations,
+        "team_report": metrics.team_report(facts, focus),
+        "formats": metrics.formats(),
+        "prematch": prematch.compare(match, focus),
+        "player_cards": metrics.player_cards(
+            metrics.window(match["events"]), match, focus
+        ),
     }
     if mode == "analyst":
         squad = [
@@ -1334,7 +2041,9 @@ async def half_time_briefing(
             }
             for p in match["teams"][focus]["players"]
         ]
-        result["changes"] = await model_or_rules(
+        targets = watch_targets(facts, findings, focus)
+        watch = {f: w["text"] for f, w in targets.items()}
+        changes = await model_or_rules(
             "coach",
             COACH_INSTRUCTIONS,
             {
@@ -1342,11 +2051,28 @@ async def half_time_briefing(
                 "findings": findings,
                 "explanations": explanations,
                 "squad": squad,
-                "targets": coach_targets(facts, focus),
+                "watch": watch,
+                "momentum_window_minutes": MOMENTUM_WINDOW_MIN,
             },
             lambda: coach_offline(findings, facts, match, focus),
             check_changes,
         )
+        # The 60' check measures the code's target, so the Watch line shown
+        # with each call is the code's wording, whatever the model wrote.
+        if any(c["watch"] != watch[c["finding"]] for c in changes):
+            coach = next(t for t in trace if t["agent"] == "coach")
+            coach["note"] = (
+                coach["note"] + "; " if coach["note"] else ""
+            ) + "watch lines set from code"
+        # Added after the model step, so the coach schema is unchanged: the
+        # typed target a decision adopts, and rules-written prompts the page
+        # labels as such.
+        notes = rules_notes(findings, focus)
+        for c in changes:
+            c["watch"] = watch[c["finding"]]
+            c["target"] = targets[c["finding"]]
+            c["rules"] = notes[c["finding"]]
+        result["changes"] = changes
     else:
         players = {p["name"]: p for p in facts["players"].values()}
         result["fan"] = await model_or_rules(
@@ -1360,6 +2086,7 @@ async def half_time_briefing(
                 "summary": facts["summary"],
                 "findings": findings,
                 "favourite_player": players.get(player) if player else None,
+                "display": display_summary(facts["summary"]),
                 "goals": [
                     m for m in facts["key_moments"] if m["kind"] == "goal"
                 ],

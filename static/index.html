@@ -161,10 +161,66 @@
   .option.rec { border-color: var(--accent); }
   .option > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .05em; }
   .option .pick { margin-left: 6px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+  .option { cursor: pointer; }
+  .option.chosen { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .option.chosen > b, .option.chosen .pick, .option.chosen p, .option.chosen .cost { color: var(--accent-text); }
+  .option .chosen-mark { display: none; margin-left: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .option.chosen .chosen-mark { display: inline; }
   .option p { margin: 4px 0 0; }
+  .checkbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 10px; }
+  .checkbar .muted { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  #check60 { background: var(--hi); color: var(--hi-text); border-color: var(--hi); font-weight: 600; }
+  .check { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; border-inline-start: 4px solid var(--border); }
+  .check.ok { border-inline-start-color: var(--hi); }
+  .check.no { border-inline-start-color: var(--away); }
+  .check b.badge { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em; font-size: 12px; margin-right: 6px; }
+  .check.ok b.badge { color: var(--hi); }
+  .check.no b.badge { color: var(--away); }
+  .check p { margin: 4px 0 0; color: var(--text-primary); }
+  .check .meta { color: var(--text-secondary); }
   .option .cost { color: var(--text-secondary); }
   .option .cost b { font-weight: 700; margin-right: 4px; }
   @media (max-width: 640px) { .options { grid-template-columns: 1fr; } }
+  /* Claude v2: priority summary, decision record and follow-up inside each call */
+  .summary { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 6px; }
+  .summary li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "n t b" "n s b"; column-gap: 10px;
+                align-items: center; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid transparent; }
+  .summary li.first { border-color: var(--accent); }
+  .summary .num { grid-area: n; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+                  background: var(--accent); color: var(--accent-text); font-weight: 800; font-size: 14px; }
+  .summary .t { grid-area: t; font-weight: 650; font-size: 14px; line-height: 1.3; }
+  .summary .st { grid-area: s; font-size: 12px; color: var(--text-secondary); }
+  .summary .pin, .summary .btn { grid-area: b; }
+  .summary .pin { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+  .unranked { font-size: 12px; margin: 4px 0 10px; color: var(--text-secondary); }
+  .btn.small { font-size: 12px; padding: 4px 10px; min-height: 0; }
+  .btn.small[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .change h3 { font-size: 17px; }
+  .change:not(.open) { padding-bottom: 10px; }
+  .change .tags .tag { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--text-secondary); }
+  .sect { margin: 10px 0 2px; font-size: 12px; }
+  .sect > b { color: var(--accent); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-display); font-size: 13px; }
+  .src { font-size: 11px; color: var(--text-muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  details.alt { font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--border); margin: 6px 0; }
+  details.alt summary { color: var(--text-primary); }
+  details.alt p { margin: 6px 0 0; }
+  .decide { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; font-size: 13px; }
+  .decide .state { flex: 1 1 100%; color: var(--text-secondary); }
+  .decide .state b { color: var(--text-primary); }
+  .decide .impl { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; color: var(--text-secondary); }
+  .change .body > p { font-size: 14px; }
+  .pipecard > summary { cursor: pointer; list-style: none; }
+  .pipecard > summary::-webkit-details-marker { display: none; }
+  .pipecard > summary h2::after { content: " ▾"; color: var(--text-muted); }
+  .pipecard:not([open]) > summary h2::after { content: " ▸"; }
+  /* On a narrow screen the calls come first; charts follow. */
+  @media (max-width: 860px) { .grid > .stack:last-child { order: -1; } }
+  .reports a { color: var(--accent); font-weight: 600; }
+  .check.mid { border-inline-start-color: var(--warn); }
+  .check.mid b.badge { color: var(--warn); }
+  .check details { margin-top: 6px; }
+  .check details p { margin: 4px 0 0; }
+
   .moments { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .moments > b { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .05em; font-family: var(--font-display); }
   .watch { font-size: 13px; color: var(--text-primary); padding: 7px 10px; border-radius: 8px; background: var(--surface-2); }
@@ -222,6 +278,51 @@
   #tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
          border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; display: none;
          box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 10; max-width: 240px; }
+  /* Two tables side by side only when the card itself has room, not the viewport. */
+  .teamgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+  .teamgrid > * { min-width: 0; overflow-x: auto; }
+  .teamgrid h3 { font-size: 15px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+  table.report { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.report td, table.report th { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+  table.report th { font-weight: 600; color: var(--text-secondary); font-size: 12px; }
+  table.report th:first-child, table.report td:first-child { text-align: left; }
+  table.report .up { color: var(--hi); font-weight: 700; }
+  table.report .down { color: var(--away); font-weight: 700; }
+  table.report td:last-child { white-space: nowrap; }
+  table.report .unit { color: var(--text-secondary); font-size: 11px; }
+  .teamnote { font-size: 12px; color: var(--text-secondary); margin: 8px 0 0; }
+  .pre-outlook { font-size: 14px; margin: 0 0 4px; }
+  .pre-scout { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
+  .prerow { display: grid; grid-template-columns: minmax(120px, 1.1fr) 2fr minmax(90px, auto); gap: 10px; align-items: center;
+            padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .prerow .who { font-size: 11px; color: var(--text-secondary); display: block; }
+  .prerow .val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .prerow .val b.good { color: var(--hi); }
+  .prerow .val b.bad { color: var(--away); }
+  /* Phone width: the values take their own line under the label and range. */
+  @media (max-width: 480px) {
+    .prerow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); row-gap: 2px; }
+    .prerow .val { grid-column: 1 / -1; text-align: left; white-space: normal; }
+  }
+  .prerow .range { position: relative; height: 22px; }
+  .prerow .band { position: absolute; top: 7px; height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); box-sizing: border-box; }
+  .prerow .tick { position: absolute; top: 3px; width: 2px; height: 16px; margin-left: -1px; background: var(--text-secondary); }
+  .prerow .dot { position: absolute; top: 5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
+  .pre details summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+  .squad { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .squad button { font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border);
+                  background: var(--surface-1); color: var(--text-secondary); cursor: pointer; }
+  .squad button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .squad button .pos { opacity: .7; margin-left: 4px; font-size: 11px; }
+  .pcard { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pcard svg { width: 100%; height: auto; display: block; }
+  .pcard h3 { margin: 0 0 4px; font-size: 18px; }
+  .pcard .insight { font-size: 14px; color: var(--text-primary); margin: 6px 0 10px; }
+  .pcard .depth { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0 2px; background: var(--surface-2); }
+  .pcard .depth span { display: block; }
+  .pcard .depthlab { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+  .pcard .pnote { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+  @media (max-width: 760px) { .pcard { grid-template-columns: 1fr; } }
   table.data { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   table.data td, table.data th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
   table.data th:first-child, table.data td:first-child { text-align: left; }
@@ -256,11 +357,11 @@
     <button class="btn" id="replay">▶ Replay first half live</button>
   </div>
 
-  <section class="card" aria-labelledby="pipeHead">
-    <div class="card-head">
+  <details class="card pipecard" id="pipeCard" open>
+    <summary class="card-head">
       <h2 id="pipeHead">The agent pipeline</h2>
       <span class="muted" id="pipeTotal"></span>
-    </div>
+    </summary>
     <div class="pipeline" id="pipeline"></div>
     <div class="pipe-foot">
       <span><span class="kind data">code</span> computes every number</span>
@@ -268,7 +369,7 @@
       <span><span class="kind rules">rules</span> same output with no model</span>
       <span><span class="kind fallback">fallback</span> model reply rejected, rules used</span>
     </div>
-  </section>
+  </details>
 
   <div class="grid">
     <div class="stack">
@@ -291,6 +392,19 @@
     <div class="stack">
       <section class="card" id="out" aria-live="polite">
         <div class="loader"><div><b>The agents are working</b><span id="elapsed"></span></div></div>
+      </section>
+      <section class="card" id="preCard" hidden>
+        <h2>Pre-match vs now</h2>
+        <div id="pre"></div>
+      </section>
+      <section class="card" id="teamCard" hidden>
+        <h2 id="teamHead">Team report</h2>
+        <div class="teamgrid" id="team"></div>
+      </section>
+      <section class="card" id="playersCard" hidden>
+        <h2 id="playersHead">Players</h2>
+        <div class="squad" id="squad" role="tablist" aria-label="Choose a player"></div>
+        <div class="pcard" id="pcard"></div>
       </section>
       <section class="card" id="liveCard" hidden>
         <h2>Live event feed</h2>
@@ -316,9 +430,26 @@
 </main>
 <div id="tip"></div>
 <script>
-const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false };
+// Claude v2: on a narrow screen the pipeline starts folded so the calls show sooner.
+document.addEventListener("DOMContentLoaded", () => { if (matchMedia("(max-width: 860px)").matches) document.getElementById("pipeCard").open = false; });
+const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null, dec: {}, first: null, open: new Set() };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// fmt-start: one display rule per metric, from halftime/metrics.py (served in
+// /api/match and the briefing as "formats"), rounding half up like Python's
+// Decimal so the page and the agents' text show the same digits.
+function fmtWith(F, key, v, kind) {
+  if (v === null || v === undefined) return "n/a";
+  const spec = F && F.kinds[kind || F.keys[key] || key];
+  if (!spec || typeof v !== "number") return String(v);
+  const [dp, scale, unit] = spec;
+  const x = v * scale, a = Math.abs(x);
+  const r = Number(Math.round(Number(a.toFixed(12) + "e" + dp)) + "e-" + dp);
+  if (x > 0 && r === 0) return "<" + (1 / 10 ** dp).toFixed(dp) + unit;
+  return (x < 0 && r !== 0 ? "-" : "") + r.toFixed(dp) + unit;
+}
+// fmt-end
+const fmt = (key, v, kind) => fmtWith((state.meta && state.meta.formats) || (state.data && state.data.formats), key, v, kind);
 const tip = $("tip");
 function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 12, innerWidth - 250) + "px"; tip.style.top = (e.clientY + 12) + "px"; }
@@ -387,8 +518,16 @@ function setBusy(busy) {
   $("out").classList.toggle("loading", busy);
 }
 
+// A check belongs to one briefing and one set of choices; bumping checkReq
+// drops any check result still in flight for the old ones.
+function clearCheck() {
+  state.check = null; state.checkReq++;
+  $("out").querySelectorAll(".checkslot").forEach((slot) => (slot.innerHTML = ""));
+}
+
 async function load() {
   const token = ++state.req;
+  state.choices = {}; state.dec = {}; state.first = null; state.open = new Set(); clearCheck();
   setBusy(true);
   drawPipeline(null);
   $("pipeTotal").textContent = "";
@@ -459,11 +598,163 @@ function render() {
   drawPitch(d.shots, d.teams);
   drawBars(d.summary);
   renderOutput(d);
+  renderPrematch(d);
+  renderTeam(d);
+  renderPlayers(d);
   renderTv(d.overlays, 0);
   $("tvPlay").disabled = false;
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
-    d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+    d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${fmt("possession_pct", w.home.possession_pct)}</td><td>${fmt("xt_created", w.home.xt_created)}</td><td>${fmt("xt_created", w.away.xt_created)}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+}
+
+// Pre-match vs now: each metric's typical range from simulations of the two
+// pre-match styles, the expected value (tick) and the real first half (dot).
+// Expected values are simulated means, so a count shows one decimal there;
+// the range ends and the actual value are observed values in the metric's own
+// format.
+const meanKind = (key) => (((state.meta && state.meta.formats) || {}).keys || {})[key] === "count" ? "mean" : undefined;
+const STYLE_WORD = (v) => (v >= 0.6 ? "high" : v >= 0.35 ? "medium" : "low");
+function renderPrematch(d) {
+  const p = d.prematch;
+  $("preCard").hidden = d.mode !== "analyst" || !p;
+  if (!p || d.mode !== "analyst") return;
+  const name = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
+  const w = p.prematch_win_pct, st = p.styles;
+  const scout = (side) => `${esc(name(side))}: press ${STYLE_WORD(st[side].press)} (${st[side].press}), directness ${STYLE_WORD(st[side].directness)} (${st[side].directness})`;
+  const row = (r) => {
+    const lo = Math.min(r.low, r.actual), hi = Math.max(r.high, r.actual), span = (hi - lo) || 1;
+    const X = (v) => 4 + 92 * (v - lo) / span;
+    const cls = r.good_for_focus === null ? "" : r.good_for_focus ? "good" : "bad";
+    const dot = r.good_for_focus === null ? "var(--text-secondary)" : r.good_for_focus ? "var(--hi)" : "var(--away)";
+    return `<div class="prerow"><div>${esc(r.label)}<span class="who">${esc(d.teams[r.side])}</span></div>
+      <div class="range" aria-hidden="true"><span class="band" style="left:${X(r.low)}%;width:${Math.max(1, X(r.high) - X(r.low))}%"></span><span class="tick" style="left:${X(r.expected)}%"></span><span class="dot" style="left:${X(r.actual)}%;background:${dot}"></span></div>
+      <div class="val">exp. ${esc(fmt(r.key, r.expected, meanKind(r.key)))} <span class="muted">(${esc(fmt(r.key, r.low))}–${esc(fmt(r.key, r.high))})</span> · <b class="${cls}">${esc(fmt(r.key, r.actual))}</b></div></div>`;
+  };
+  const changed = p.changes.map((c) => p.rows.find((r) => r.side === c.side && r.key === c.key));
+  const rest = p.rows.filter((r) => r.verdict === "as_expected");
+  $("pre").innerHTML = `<div class="pre">
+    <p class="pre-outlook"><b>Before kick-off</b> ${esc(name("home"))} win ${w.home}% · draw ${w.draw}% · ${esc(name("away"))} win ${w.away}% <span class="muted">(${p.simulations} simulations of the two pre-match styles)</span>. <b>Half-time</b> ${d.score.home}–${d.score.away}.</p>
+    <p class="pre-scout">Scouting report: ${scout("home")} · ${scout("away")}</p>
+    <h3 style="font-size:14px;margin:6px 0 2px">Outside the expected range (${changed.length})</h3>
+    ${changed.map(row).join("") || '<p class="muted">Everything is within the expected range.</p>'}
+    <details><summary>As expected (${rest.length})</summary>${rest.map(row).join("")}</details>
+    <p class="teamnote">Bar: 10th to 90th percentile of the simulated first halves. Tick: expected (average). Dot: this match, green if it helps ${esc(d.focus_team)}, red if it hurts.</p></div>`;
+}
+
+// Player cards: a squad picker, an action heatmap in the player's attacking
+// frame, the card's numbers and an insight written in code.
+function renderPlayers(d) {
+  const cards = d.player_cards || [];
+  $("playersCard").hidden = !cards.length;
+  if (!cards.length) return;
+  $("playersHead").textContent = `Players · ${d.focus_team}`;
+  const fav = d.mode === "fan" && state.player && cards.find((c) => c.name === state.player);
+  const keep = cards.find((c) => c.id === state.card);
+  const best = cards.reduce((a, c) => (c.stats.xt_created > a.stats.xt_created ? c : a), cards[0]);
+  state.card = (fav || keep || best).id;
+  $("squad").innerHTML = cards.map((c) => `<button role="tab" data-id="${esc(c.id)}" aria-selected="${c.id === state.card}">${esc(c.name)}<span class="pos">${esc(c.position)}</span></button>`).join("");
+  $("squad").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    state.card = b.dataset.id;
+    $("squad").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    drawPlayerCard(d, cards.find((c) => c.id === state.card));
+  }));
+  drawPlayerCard(d, cards.find((c) => c.id === state.card));
+}
+
+// Chip order by role: what matters for the position comes first; every chip
+// is still shown.
+const ROLE_ORDER = {
+  gk: ["passes", "lost", "interceptions", "tackles", "fouls", "pressures", "xt", "shots"],
+  cb: ["tackles", "interceptions", "lost", "passes", "fouls", "pressures", "xt", "shots"],
+  fb: ["xt", "tackles", "interceptions", "passes", "pressures", "lost", "fouls", "shots"],
+  dm: ["passes", "lost", "tackles", "interceptions", "pressures", "xt", "fouls", "shots"],
+  cm: ["xt", "passes", "pressures", "tackles", "interceptions", "lost", "fouls", "shots"],
+  winger: ["xt", "shots", "passes", "pressures", "lost", "tackles", "interceptions", "fouls"],
+  st: ["shots", "passes", "pressures", "xt", "lost", "tackles", "interceptions", "fouls"],
+  other: ["passes", "xt", "shots", "pressures", "tackles", "interceptions", "fouls", "lost"],
+};
+const ROLE_CHIPS = { GK: ROLE_ORDER.gk, CB: ROLE_ORDER.cb, RB: ROLE_ORDER.fb, LB: ROLE_ORDER.fb, DM: ROLE_ORDER.dm,
+                     CM: ROLE_ORDER.cm, RW: ROLE_ORDER.winger, LW: ROLE_ORDER.winger, ST: ROLE_ORDER.st, other: ROLE_ORDER.other };
+const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
+
+function drawPlayerCard(d, c) {
+  const st = c.stats, hm = c.heatmap, color = d.focus === "away" ? "var(--away)" : "var(--home)";
+  const s = 5, cw = 105 / hm.grid[0].length, rh = 68 / hm.grid.length;
+  const max = Math.max(1, ...hm.grid.flat());
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 525 360"); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${c.name} action heatmap, attacking left to right`);
+  const line = { fill: "none", stroke: "var(--pitch-line)", "stroke-width": 1.5 };
+  el("rect", { x: 0, y: 0, width: 525, height: 340, fill: "var(--pitch)", rx: 6 }, svg);
+  const defs = el("defs", {}, svg), uid = "heat" + c.id;
+  el("feGaussianBlur", { stdDeviation: 9 }, el("filter", { id: uid + "b", x: "-10%", y: "-10%", width: "120%", height: "120%" }, defs));
+  el("rect", { width: 525, height: 340, rx: 6 }, el("clipPath", { id: uid + "c" }, defs));
+  const layer = el("g", { filter: `url(#${uid}b)`, "clip-path": `url(#${uid}c)` }, el("g", { "clip-path": `url(#${uid}c)` }, svg));
+  // Row 0 is y = 0, the right touchline when attacking left to right, so it is
+  // drawn at the bottom.
+  hm.grid.forEach((row, r) => row.forEach((n, col) => {
+    if (!n) return;
+    const cell = el("rect", { x: col * cw * s, y: (68 - (r + 1) * rh) * s, width: cw * s, height: rh * s,
+                              fill: color, "fill-opacity": (0.1 + 0.85 * n / max).toFixed(2) }, layer);
+    cell.addEventListener("mousemove", (e) => showTip(e, `${n} action${n === 1 ? "" : "s"}`));
+    cell.addEventListener("mouseleave", hideTip);
+  }));
+  el("rect", { x: 1, y: 1, width: 523, height: 338, ...line }, svg);
+  el("line", { x1: 262.5, x2: 262.5, y1: 0, y2: 340, ...line }, svg);
+  el("circle", { cx: 262.5, cy: 170, r: 45.75, ...line }, svg);
+  for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
+  el("text", { x: 262.5, y: 355, "text-anchor": "middle" }, svg).textContent = "Attacking →";
+  const t = hm.thirds_pct;
+  const all = {
+    passes: ["Passes", `${fmt("passes_complete", st.passes_complete)}/${fmt("passes", st.passes)} (${fmt("pass_accuracy", st.pass_accuracy)})`],
+    xt: ["Threat (xT)", `${fmt("xt_created", st.xt_created)} · ${ordinal(c.xt_rank)} in team`],
+    shots: ["Shots", `${fmt("shots", st.shots)} (xG ${fmt("xg", st.xg)})`],
+    pressures: ["Pressures", fmt("pressures", st.pressures)],
+    tackles: ["Tackles", fmt("tackles", st.tackles)],
+    interceptions: ["Interceptions", fmt("interceptions", st.interceptions)],
+    fouls: ["Fouls", fmt("fouls", st.fouls)],
+    lost: ["Lost in own half", fmt("lost_ball_in_own_half", st.lost_ball_in_own_half)],
+  };
+  const chips = (ROLE_CHIPS[c.position] || ROLE_CHIPS.other).map((k) => all[k]);
+  if (st.top_sprint_kmh) chips.push(["Top sprint", fmt("top_sprint_kmh", st.top_sprint_kmh)]);
+  $("pcard").innerHTML = `<div class="pitchwrap"></div><div>
+    <h3>${esc(c.name)} <span class="muted">#${c.number} · ${esc(c.position)}</span></h3>
+    <p class="insight">${esc(c.insight)}</p>
+    <div class="chips">${chips.map(([k, v]) => `<span class="chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
+    <div class="depth" aria-hidden="true"><span style="flex:${t.defensive};background:${color};opacity:.35"></span><span style="flex:${t.middle};background:${color};opacity:.65"></span><span style="flex:${t.final};background:${color}"></span></div>
+    <div class="depthlab"><span>Own third ${fmt("share_pct", t.defensive)}</span><span>Middle ${fmt("share_pct", t.middle)}</span><span>Final third ${fmt("share_pct", t.final)}</span></div>
+    <p class="pnote">${hm.actions} first-half recorded actions: passes, shots, pressures, tackles, interceptions and fouls where they happened, plus passes received. Event data, not tracking; the synthetic generator models depth, not which flank a player plays on.</p></div>`;
+  $("pcard").querySelector(".pitchwrap").appendChild(svg);
+}
+
+// Team report: attack and defence rows for both sides, with the focus team's
+// rate before and after the turning point. Arrows are coloured by whether the
+// change is good for the focus team, using the "better" direction from code.
+function renderTeam(d) {
+  const r = d.team_report;
+  $("teamCard").hidden = d.mode !== "analyst" || !r;
+  if (!r || d.mode !== "analyst") return;
+  const opp = d.focus === "home" ? "away" : "home", t = r.turning_point;
+  const short = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
+  $("teamHead").textContent = `Team report · ${d.focus_team}`;
+  const table = (title, rows) => `<div><h3>${title}</h3><table class="report">
+    <tr><th></th><th>${esc(short(d.focus))}</th><th>${esc(short(opp))}</th><th>${esc(short(d.focus))} 0–${t}' → ${t}'+</th></tr>` +
+    rows.map((x) => {
+      let cls = "", arrow = "→";
+      if (x.us_before !== null && x.us_after !== null && x.us_before !== x.us_after) {
+        const rose = x.us_after > x.us_before;
+        arrow = rose ? "▲" : "▼";
+        cls = rose === (x.better === "higher") ? "up" : "down";
+      }
+      // Split values are per-10-minute rates where the count depends on the
+      // window; plain metric format otherwise.
+      const sk = x.split_unit ? "rate" : undefined;
+      return `<tr><td>${esc(x.label)}</td><td><b>${esc(fmt(x.key, x.us))}</b></td><td>${esc(fmt(x.key, x.them))}</td>
+        <td>${esc(fmt(x.key, x.us_before, sk))} <span class="${cls}">${arrow}</span> ${esc(fmt(x.key, x.us_after, sk))}${x.split_unit ? `<span class="unit">*</span>` : ""}</td></tr>`;
+    }).join("") + "</table></div>";
+  $("team").innerHTML = table("Attacking", r.attack) + table("Defending", r.defence);
+  $("team").insertAdjacentHTML("beforeend", `<p class="teamnote" style="grid-column:1/-1">Green arrows are changes that help ${esc(d.focus_team)}, red ones hurt. * Counts are per 10 minutes either side of the turning point at ${t}', so the two spells compare fairly. PPDA is opponent passes per defensive action: lower means a more intense press.</p>`);
 }
 
 function drawMomentum(tl, tp, upto = 45) {
@@ -484,7 +775,7 @@ function drawMomentum(tl, tp, upto = 45) {
     el("rect", { x, y: v >= 0 ? mid - hgt : mid, width: bw - 6, height: hgt, rx: 4,
                  fill: v >= 0 ? "var(--home)" : "var(--away)" }, g);
     const hit = el("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }, g);
-    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${w.home.xt_created}, xG ${w.home.xg}<br>Away xT ${w.away.xt_created}, xG ${w.away.xg}<br>Home possession ${w.home.possession_pct}%`));
+    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${fmt("xt_created", w.home.xt_created)}, xG ${fmt("xg", w.home.xg)}<br>Away xT ${fmt("xt_created", w.away.xt_created)}, xG ${fmt("xg", w.away.xg)}<br>Home possession ${fmt("possession_pct", w.home.possession_pct)}`));
     hit.addEventListener("mouseleave", hideTip);
   });
   if (tp && tp < upto) {
@@ -512,26 +803,27 @@ function drawPitch(shots, teams, upto = 46) {
     const r = 5 + Math.sqrt(sh.xg) * 18;
     const c = el("circle", { cx: x, cy: y, r, fill: goal ? color : "transparent", "fill-opacity": goal ? 0.9 : 0,
                             stroke: color, "stroke-width": 2 }, svg);
-    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${sh.xg} · ${esc(sh.outcome.replace("_", " "))}`));
+    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${fmt("xg", sh.xg)} · ${esc(sh.outcome.replace("_", " "))}`));
     c.addEventListener("mouseleave", hideTip);
   }
 }
 
-const BAR_ROWS = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
-                  ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
+const BAR_ROWS = [["Possession", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
+                  ["Shots", "shots"], ["Pass accuracy", "pass_accuracy"], ["High presses", "high_presses"]];
 function drawBars(sum) {
-  $("bars").innerHTML = BAR_ROWS.map(([label, k, mul]) => {
-    const h = +(sum.home[k] * (mul || 1)).toFixed(mul ? 0 : 2), a = +(sum.away[k] * (mul || 1)).toFixed(mul ? 0 : 2);
-    const tot = h + a || 1;
-    return `<div class="row"><div class="label">${label}</div><span class="v">${h}</span>
+  $("bars").innerHTML = BAR_ROWS.map(([label, k]) => {
+    const h = sum.home[k] || 0, a = sum.away[k] || 0, tot = h + a || 1;
+    return `<div class="row"><div class="label">${label}</div><span class="v">${esc(fmt(k, sum.home[k]))}</span>
       <div class="track"><span style="flex:${h / tot};background:var(--home)"></span><span style="flex:${a / tot};background:var(--away)"></span></div>
-      <span class="v r">${a}</span></div>`;
+      <span class="v r">${esc(fmt(k, sum.away[k]))}</span></div>`;
   }).join("");
 }
 
 function evidenceChips(f) {
-  const show = (x) => (x === null || x === undefined ? "n/a" : x);
+  // Items tagged with a metric use its display rule; model items without one
+  // show as given.
   return (f.evidence || []).map((e) => {
+    const show = (x) => (e.metric ? fmt(e.metric, x) : x === null || x === undefined ? "n/a" : x);
     if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → <b>${esc(show(e.after))}</b></span>`;
     const v = e.value && typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${show(x)}`).join(", ") : show(e.value);
     return `<span class="chip">${esc(e.label)}: <b>${esc(v)}</b></span>`;
@@ -545,25 +837,202 @@ function momentChips(f) {
   return `<div class="moments"><b>Clips</b>` + f.moments.map((m) => `<span class="chip"><span class="swatch" style="background:var(--${m.team === "away" ? "away" : "home"})"></span>${clock(m)} ${esc(m.player)}${m.receiver ? " → " + esc(m.receiver) : ""} · ${KINDS[m.kind] || esc(m.kind)}</span>`).join("") + "</div>";
 }
 
+// ---- Claude v2: decide and follow up inside each call --------------------
+// Decision state lives in the page only. Each call has a drafted option (none
+// until the analyst picks), a decision (open, adopted, deferred, rejected) and,
+// separately, whether the change was confirmed in place at the restart.
+const FINDINGS = ["press", "threat", "scoreline"];
+const dec = (f) => (state.dec[f] = state.dec[f] || { draft: null, status: "open", implemented: false });
+const choice = (f) => dec(f).draft || "a";
+const changeFor = (f) => ((state.data && state.data.changes) || []).find((c) => c.finding === f) || {};
+// The decision record sent with a check: the server rejects a target that is
+// no longer the one it would measure.
+const decisions = () => Object.fromEntries(FINDINGS.map((f) => {
+  const d = dec(f);
+  return [f, { option: d.draft, status: d.status, implemented: d.implemented, target_id: (changeFor(f).target || {}).id || null }];
+}));
+
+function decisionLabel(f) {
+  const d = dec(f), opt = d.draft ? "Option " + d.draft.toUpperCase() : "";
+  if (d.status === "adopted") return opt + " adopted";
+  if (d.status === "deferred") return "Deferred";
+  if (d.status === "rejected") return "Rejected: no change";
+  return d.draft ? opt + " drafted, not adopted" : "Not decided";
+}
+function implLabel(f) {
+  const d = dec(f);
+  if (d.status !== "adopted") return "";
+  return d.implemented ? "In place from the restart (46')" : "Not confirmed in place";
+}
+
+async function runCheck() {
+  const d = state.data, btn = $("check60");
+  if (!d || d.mode !== "analyst") return;
+  const token = ++state.checkReq;
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const res = await fetch("api/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ focus: d.focus, choices: Object.fromEntries(FINDINGS.map((f) => [f, choice(f)])), decisions: decisions(), findings: d.findings, changes: d.changes }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(typeof body.detail === "string" ? body.detail : "check request failed (" + res.status + ")");
+    }
+    const check = await res.json();
+    if (token !== state.checkReq || d !== state.data) return;
+    state.check = check;
+    renderOutput(d);
+  } catch (err) {
+    if (token !== state.checkReq || d !== state.data) return;
+    $("out").querySelector(".checkbar .muted").textContent = "Could not run the check: " + err.message + ". Try again.";
+  } finally {
+    btn.disabled = false; btn.textContent = "⏱ Check at 60'";
+  }
+}
+
+const STATUS = {
+  met: ["ok", "Target met so far"],
+  not_met: ["no", "Target not met"],
+  too_close: ["mid", "Too close to call"],
+  insufficient: ["mid", "Not enough evidence"],
+};
+function followUp(f, c) {
+  const k = state.check;
+  if (!k || k.focus !== state.data.focus) return "";
+  const x = (k.checks || []).find((y) => y.finding === f);
+  if (!x) return "";
+  const g = x.guardrail, d = dec(f);
+  const [cls, badge] = STATUS[x.status] || ["mid", "No result"];
+  const goal = x.direction === "below" ? "under" : "at least";
+  const v = (k.verdicts || []).find((y) => y.finding === f) || {};
+  const agent = (k.trace || []).find((t) => t.agent === "verifier") || {};
+  let moved = "";
+  if (x.baseline != null && x.value != null && x.value !== x.baseline) {
+    const better = x.direction === "below" ? x.value < x.baseline : x.value > x.baseline;
+    moved = ` Moved from ${esc(fmt(x.metric, x.baseline))} at the end of the first half (${better ? "better" : "worse"}).`;
+  }
+  // The advice is written here from the status and the decision; the
+  // verifier agent's own wording is shown only under details.
+  const adopted = x.adopted !== false;
+  const next = (adopted ? {
+    met: "Keep reviewing; one window is not proof the option worked.",
+    not_met: "Review with staff: keep, adjust, or look again at option " + (choice(f) === "a" ? "B" : "A") + " (context, not a recommendation).",
+  } : {
+    met: "Monitoring only: no option was adopted for this call.",
+    not_met: "Monitoring only: no option was adopted, so there is nothing to review yet.",
+  })[x.status] || {
+    too_close: "Too close to call after " + x.minutes + " minutes; look again later.",
+    insufficient: "Not enough play yet to judge: " + x.n + " " + x.unit + (x.value === null ? ", nothing to measure." : "."),
+  }[x.status] || "";
+  const decided = d.status === "adopted"
+    ? (d.implemented ? "Adopted and in place from 46'." : "Adopted, but not confirmed in place, so read this with care.")
+    : "Not adopted. Shown for monitoring only.";
+  const guard = g
+    ? `<p class="meta"><b>Cost check</b> ${esc(g.label)}: <b>${esc(fmt(g.metric, g.value))}</b> against ${esc(fmt(g.metric, g.reference))} from ${esc(g.reference_label)}${g.enough ? "" : " (too few passes to read)"}. ${esc(g.why)} <i>Proposed policy; a comparison, not a pass or fail.</i></p>`
+    : `<p class="meta"><b>Cost check</b> No measurable cost defined for this call.</p>`;
+  return `<div class="check ${cls}"><b class="badge">${badge} · ${k.until}'</b><span class="meta">score ${k.score.home}–${k.score.away}</span>
+    <p>${esc(x.label)}: <b>${esc(fmt(x.metric, x.value))}</b> from ${esc(x.n)} ${esc(x.unit)} in ${esc(x.window)} (${x.minutes} min). Target ${goal} ${esc(fmt(x.metric, x.target))}.${moved}</p>
+    <p><b>Next</b> ${esc(next)}</p>
+    <p class="meta"><b>Decision</b> ${esc(decided)}</p>
+    ${guard}
+    <details><summary>Evidence rule and verifier wording</summary>
+      <p class="meta">Evidence rule (proposed): ${esc(x.rule)}.</p>
+      <p class="meta">Verifier agent's wording (${esc(agent.backend || "")}), not the advice above: ${esc(v.verdict || "")}</p></details>
+    <p class="meta">The synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
+}
+
+function callBody(c, f, x) {
+  const p = c.rules || {}, d = dec(c.finding), t = c.target || {};
+  const opt = (o, text, cost, best) => `<div class="option${d.draft === o ? " chosen" : ""}" data-option="${o}" data-key="opt:${esc(c.finding)}:${o}" role="button" tabindex="0" aria-pressed="${d.draft === o}">
+      <b>Option ${o.toUpperCase()}</b>${o === "a" ? '<span class="pick">coach agent\'s pick</span>' : ""}<span class="chosen-mark">✓ drafted</span>
+      <p>${esc(text)}</p><p class="cost"><b>Cost</b> ${esc(cost)}</p>
+      <p class="cost"><b>Best when</b> ${esc(best || "")}</p></div>`;
+  return `<div class="body">
+    <div class="sect"><b>What we saw</b> <span class="src">measured, first half, before and after ${esc(f.minute)}'</span></div>
+    <div class="chips">${evidenceChips(f)}</div>
+    <div class="sect"><b>Why: leading explanation</b> <span class="src">explainer agent</span></div>
+    <p>${esc(x.why_it_matters || "")}</p>
+    <details class="alt"><summary><b>Or maybe:</b> ${esc(p.alternative || "")}</summary>
+      <p><b>What would tell them apart:</b> ${esc(p.tell_apart || "")}</p>
+      <p class="src">Written by rules, not by a model and not measured. The data cannot settle it; video can.</p></details>
+    <div class="sect"><b>Options</b> <span class="src">pick one to draft; nothing is chosen for you</span></div>
+    <div class="options" data-finding="${esc(c.finding)}">${opt("a", c.action, c.tradeoff, c.best_when)}${opt("b", c.alternative, c.alternative_tradeoff, c.alternative_best_when)}</div>
+    <div class="decide" data-finding="${esc(c.finding)}">
+      <span class="state"><b>${esc(decisionLabel(c.finding))}</b>${implLabel(c.finding) ? " · " + esc(implLabel(c.finding)) : ""}</span>
+      <button class="btn small" data-act="adopted" data-key="act:${esc(c.finding)}:adopted" ${d.draft ? "" : "disabled"} aria-pressed="${d.status === "adopted"}">Adopt</button>
+      <button class="btn small" data-act="deferred" data-key="act:${esc(c.finding)}:deferred" aria-pressed="${d.status === "deferred"}">Defer</button>
+      <button class="btn small" data-act="rejected" data-key="act:${esc(c.finding)}:rejected" aria-pressed="${d.status === "rejected"}">Reject</button>
+      <label class="impl"><input type="checkbox" data-act="impl" data-key="impl:${esc(c.finding)}" ${d.implemented ? "checked" : ""} ${d.status === "adopted" ? "" : "disabled"}> Confirmed in place at 46'</label>
+    </div>
+    <div class="watch"><b>Watch</b> ${esc(t.text || c.watch)} <span class="src">target ${esc(t.id || "")} · ${esc(t.policy || "")}</span></div>
+    ${momentChips(f)}
+    <div class="moments reports"><b>Reports</b><a href="#preCard">Pre-match vs now</a><a href="#teamCard">Team report</a><a href="#playersCard">Player cards</a></div>
+    <div class="checkslot" data-finding="${esc(c.finding)}">${followUp(c.finding, c)}</div></div>`;
+}
+
 const CONCEPTS = { pressure: "Pressure", rhythm: "Game rhythm", chance_quality: "Chance quality", control: "Control vs chaos" };
 function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
   if (d.mode === "analyst") {
-    $("out").innerHTML = LOADER + `<h2>Three calls for the second half · ${esc(d.focus_team)}</h2><div class="reveal">` + d.changes.map((c, i) => {
-      const f = finds[c.finding] || {}, x = expl[c.finding] || {};
-      const concept = x.concept || CONCEPTS[f.concept] || f.concept || "";
-      return `<div class="change"><h3><span class="num">${i + 1}</span><span>${esc(f.title || c.action)}</span></h3>
-        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}</div>
-        <div class="body"><p>${esc(x.why_it_matters || "")}</p>
-        <div class="chips">${evidenceChips(f)}</div>
-        <div class="options">
-          <div class="option rec"><b>Option A</b><span class="pick">recommended</span><p>${esc(c.action)}</p><p class="cost"><b>Cost</b> ${esc(c.tradeoff)}</p></div>
-          <div class="option"><b>Option B</b><p>${esc(c.alternative)}</p><p class="cost"><b>Cost</b> ${esc(c.alternative_tradeoff)}</p></div>
-        </div>
-        <div class="watch"><b>Watch</b> ${esc(c.watch)}</div>
-        ${momentChips(f)}</div></div>`;
+    // Redrawing replaces the controls, so remember which one had focus.
+    const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
+    if (!state.first) state.first = d.changes[0].finding;
+    const order = [state.first, ...d.changes.map((c) => c.finding).filter((f) => f !== state.first)];
+    const byF = Object.fromEntries(d.changes.map((c, i) => [c.finding, { c, n: i + 1 }]));
+    const summary = order.map((f) => {
+      const { c, n } = byF[f], fd = finds[f] || {};
+      return `<li class="${f === state.first ? "first" : ""}"><span class="num">${n}</span><span class="t">${esc(fd.title || c.action)}</span>
+        <span class="st">${esc(decisionLabel(f))}</span>
+        ${f === state.first ? '<span class="pin">Discuss first</span>' : `<button class="btn small" data-first="${esc(f)}" data-key="first:${esc(f)}">Discuss first</button>`}</li>`;
+    }).join("");
+    $("out").innerHTML = LOADER + `<h2>Three calls · ${esc(d.focus_team)}</h2>
+      <ol class="summary">${summary}</ol>
+      <p class="muted unranked">Unranked: you pick which call to discuss first. The other calls stay below.</p>
+      <div class="checkbar"><button class="btn" id="check60">⏱ Check at 60'</button><p class="muted">Draft and adopt options, then check each Watch target on 46'–60'.</p></div>
+      <div class="reveal">` + order.map((f) => {
+      const { c, n } = byF[f], fd = finds[f] || {}, x = expl[f] || {};
+      const concept = x.concept || CONCEPTS[fd.concept] || fd.concept || "";
+      const open = f === state.first || state.open.has(f);
+      // After "Discuss first", focus lands on that call's heading (same key).
+      const head = f === state.first ? ` tabindex="-1" data-key="first:${esc(f)}"` : "";
+      return `<div class="change${open ? " open" : ""}" data-finding="${esc(f)}"><h3${head}><span class="num">${n}</span><span>${esc(fd.title || c.action)}</span></h3>
+        <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}<span class="tag">${esc(decisionLabel(f))}</span>
+        ${f === state.first ? "" : `<button class="btn small toggle" data-key="toggle:${esc(f)}" aria-expanded="${open}">${open ? "Hide" : "Open"}</button>`}</div>
+        ${open ? callBody(c, fd, x) : ""}</div>`;
     }).join("") + "</div>";
+    const out = $("out");
+    out.querySelectorAll("[data-first]").forEach((b) => b.addEventListener("click", () => { state.first = b.dataset.first; renderOutput(d); }));
+    out.querySelectorAll(".toggle").forEach((b) => b.addEventListener("click", () => {
+      const f = b.closest(".change").dataset.finding;
+      state.open.has(f) ? state.open.delete(f) : state.open.add(f); renderOutput(d);
+    }));
+    out.querySelectorAll(".option").forEach((el) => {
+      const pick = () => {
+        const f = el.parentElement.dataset.finding, s = dec(f);
+        if (s.draft === el.dataset.option) return;
+        // A new draft reopens the decision; the old adoption and check no longer apply.
+        Object.assign(s, { draft: el.dataset.option, status: "open", implemented: false });
+        clearCheck(); renderOutput(d);
+      };
+      el.addEventListener("click", pick);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
+    out.querySelectorAll(".decide button").forEach((b) => b.addEventListener("click", () => {
+      const s = dec(b.parentElement.dataset.finding);
+      s.status = s.status === b.dataset.act ? "open" : b.dataset.act;
+      if (s.status !== "adopted") s.implemented = false;
+      clearCheck(); renderOutput(d);
+    }));
+    out.querySelectorAll(".decide input").forEach((i) => i.addEventListener("change", () => {
+      dec(i.closest(".decide").dataset.finding).implemented = i.checked; clearCheck(); renderOutput(d);
+    }));
+    $("check60").addEventListener("click", runCheck);
+    if (focusKey) {
+      const el = out.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
+      if (el) el.focus({ preventScroll: true });
+    }
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
     $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
@@ -584,9 +1053,9 @@ function renderTv(cards, i) {
   if (c.type === "stat_bars") {
     body = `<div class="gfx panel"><h4>${esc(c.title)}</h4>` + c.rows.map((r) => {
       const tot = (r.home + r.away) || 1;
-      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home)}</span>
+      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home_text ?? r.home)}</span>
         <span class="bar"><i style="flex:${r.home / tot};background:var(--home)"></i><i style="flex:${r.away / tot};background:var(--away)"></i></span>
-        <span class="r">${esc(r.away)}</span></div>`;
+        <span class="r">${esc(r.away_text ?? r.away)}</span></div>`;
     }).join("") + "</div>";
   } else if (c.type === "momentum") {
     const bars = c.series.map((s) => {
@@ -655,7 +1124,7 @@ async function playEvents(d, evs, btn, feed) {
         $("scorebug").classList.remove("flash"); void $("scorebug").offsetWidth; $("scorebug").classList.add("flash");
       }
       if (interesting.has(e.type)) {
-        const extra = e.type === "shot" ? ` · xG ${e.xg} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${e.speed_kmh} km/h`
+        const extra = e.type === "shot" ? ` · xG ${fmt("xg", e.xg)} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${fmt("top_sprint_kmh", e.speed_kmh)}`
           : e.type === "goal" ? ` · ${e.score.home}-${e.score.away}` : "";
         feed.insertAdjacentHTML("afterbegin", `<div class="${e.type === "goal" ? "big" : ""}">${e.minute}' <span class="swatch" style="background:var(--${e.team === "away" ? "away" : "home"})"></span>${esc(e.player)} ${esc(e.type.toUpperCase())}${esc(extra)}</div>`);
       }
