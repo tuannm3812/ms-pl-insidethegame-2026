@@ -269,8 +269,10 @@ def test_agent_framework_path_uses_model_replies(match):
             "finding": f["id"],
             "action": f"do {i}",
             "tradeoff": "costs",
+            "best_when": "fits",
             "alternative": f"or {i}",
             "alternative_tradeoff": "costs more",
+            "alternative_best_when": "fits later",
             "watch": "x",
         }
         for i, f in enumerate(findings)
@@ -647,8 +649,10 @@ def test_coach_reply_rejection_names_the_bad_field():
             "finding": f,
             "action": "Press higher.",
             "tradeoff": "Tired legs.",
+            "best_when": "They play out short.",
             "alternative": "Sit deeper.",
             "alternative_tradeoff": "Less of the ball.",
+            "alternative_best_when": "We need to protect a lead.",
             "watch": "Win it back.",
         }
         for f in ("press", "threat", "scoreline")
@@ -859,7 +863,7 @@ def test_briefing_changes_carry_target_and_rules_text(match):
         assert c["target"]["id"] == f"{c['finding']}.away.v1"
         assert c["target"]["text"] == c["watch"]
         assert c["rules"]["source"] == "rules"
-        assert set(c["rules"]["best_when"]) == {"a", "b"}
+        assert c["best_when"] and c["alternative_best_when"]
         assert c["rules"]["alternative"] and c["rules"]["tell_apart"]
 
 
@@ -900,3 +904,155 @@ def test_check_decisions(monkeypatch):
         "/api/check", json=body | {"decisions": {"press": {"status": "done"}}}
     )
     assert r.status_code == 422
+
+
+def test_scoreline_naming_the_opponent_is_checked_as_xg(match, monkeypatch):
+    import app as app_module
+
+    findings, explanations, changes = _rules(match)
+    findings[2]["team"] = "away"
+    monkeypatch.setattr(app_module, "client", None)
+    r = TestClient(app_module.app).post(
+        "/api/check", json={"findings": findings, "changes": changes}
+    )
+    assert r.status_code == 200
+    score = r.json()["checks"][2]
+    assert score["finding"] == "scoreline" and "xG" in score["label"]
+    # The same finding accepted from a model reply checks without error.
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(changes)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["tactics"] == "ScriptedClient"
+    assert out["findings"][2]["team"] == "away"
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    assert check["checks"][2]["unit"].startswith("shots by")
+
+
+SEED_5 = 5
+
+
+@pytest.fixture(scope="module")
+def match5():
+    return generate_match(SEED_5)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"option": None, "status": "rejected"},
+        {"option": "b", "status": "deferred"},
+        {"option": "a", "status": "open"},
+        {"option": None, "status": "open"},
+    ],
+)
+def test_calls_not_adopted_get_no_option_advice(match5, record):
+    findings, _, changes = _rules(match5)
+    decisions = {f: dict(record) for f in ("press", "threat", "scoreline")}
+    out = asyncio.run(
+        second_half_check(
+            match5, findings=findings, changes=changes, decisions=decisions
+        )
+    )
+    checks = {c["finding"]: c for c in out["checks"]}
+    # Seed 5, home: the threat target is met (0.22 against at least 0.22).
+    assert checks["threat"]["status"] == "met"
+    for v in out["verdicts"]:
+        assert v["next"] == "review"
+        assert v["verdict"].startswith("Monitoring only")
+        assert "option" not in v["verdict"].replace("no option adopted", "")
+        assert not checks[v["finding"]]["adopted"]
+
+
+def test_adopted_call_keeps_and_unconfirmed_is_flagged(match5, monkeypatch):
+    import app as app_module
+
+    findings, _, changes = _rules(match5)
+    decisions = {"threat": {"option": "b", "status": "adopted"}}
+    out = asyncio.run(
+        second_half_check(
+            match5, findings=findings, changes=changes, decisions=decisions
+        )
+    )
+    v = {x["finding"]: x for x in out["verdicts"]}
+    checks = {c["finding"]: c for c in out["checks"]}
+    assert v["threat"]["next"] == "keep"
+    assert changes[1]["alternative"] in v["threat"]["verdict"]
+    assert checks["threat"]["implemented"] is False
+    # Calls left out of the record are open, so monitoring only.
+    assert v["press"]["verdict"].startswith("Monitoring only")
+    # The model may not say keep for a call that was not adopted.
+    keep_all = [
+        {"finding": f, "verdict": "Keep it.", "next": "keep"}
+        for f in ("press", "threat", "scoreline")
+    ]
+    with pytest.raises(ValueError, match="adopted target is met"):
+        from halftime.agents import check_verdicts as cv
+
+        cv(keep_all, out["checks"])
+    client = ScriptedClient([json.dumps(keep_all)])
+    out = asyncio.run(
+        second_half_check(
+            match5,
+            findings=findings,
+            changes=changes,
+            decisions={"press": {"option": None, "status": "rejected"}},
+            client=client,
+        )
+    )
+    assert out["trace"][1]["backend"] == "offline-rules"
+    assert "adopted target is met" in out["trace"][1]["note"]
+    # Through the API: adopting or confirming needs an option.
+    monkeypatch.setattr(app_module, "client", None)
+    c = TestClient(app_module.app)
+    body = {"seed": SEED_5, "findings": findings, "changes": changes}
+    bad = {"press": {"status": "adopted", "implemented": True}}
+    r = c.post("/api/check", json=body | {"decisions": bad})
+    assert r.status_code == 422 and "needs an option" in r.json()["detail"]
+    rejected = {
+        f: {"option": None, "status": "rejected"}
+        for f in ("press", "threat", "scoreline")
+    }
+    r = c.post("/api/check", json=body | {"decisions": rejected})
+    assert r.status_code == 200
+    assert all(x["next"] == "review" for x in r.json()["verdicts"])
+
+
+def test_best_when_travels_with_its_option(match):
+    findings, explanations, changes = _rules(match)
+    swapped = [
+        dict(
+            c,
+            action=c["alternative"],
+            tradeoff=c["alternative_tradeoff"],
+            best_when=c["alternative_best_when"],
+            alternative=c["action"],
+            alternative_tradeoff=c["tradeoff"],
+            alternative_best_when=c["best_when"],
+        )
+        for c in changes
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(swapped)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "ScriptedClient"
+    for got, rule in zip(out["changes"], changes, strict=True):
+        assert got["action"] == rule["alternative"]
+        assert got["best_when"] == rule["alternative_best_when"]
+        assert got["alternative_best_when"] == rule["best_when"]
+        assert "best_when" not in got["rules"]
+    # A coach reply without best-when falls back to the rules coach.
+    bare = [
+        {k: v for k, v in c.items() if "best_when" not in k} for c in changes
+    ]
+    client = ScriptedClient(
+        [json.dumps(findings), json.dumps(explanations), json.dumps(bare)]
+    )
+    out = asyncio.run(half_time_briefing(match, client=client))
+    assert _backends(out)["coach"] == "offline-rules"
+    assert all(c["best_when"] for c in out["changes"])

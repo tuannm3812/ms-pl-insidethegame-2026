@@ -12,7 +12,8 @@
   h1 { font-size: 16px; margin: 0; }
   .note { color: var(--muted); font-size: 12px; }
   main { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 8px 8px; height: calc(100vh - 64px); }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; height: auto; } .pane iframe { height: 80vh; } }
+  /* Narrow: stack the panes; flex: none so the 80vh height is not overridden by flex-basis 0. */
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; height: auto; } .pane iframe { flex: none; height: 80vh; } }
   .pane { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
   .bar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   .bar a { color: var(--accent); font-size: 12px; }

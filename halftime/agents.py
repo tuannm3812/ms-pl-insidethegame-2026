@@ -362,8 +362,10 @@ def check_explanations(explanations: Any) -> list[dict]:
 CHANGE_TEXT_FIELDS = (
     "action",
     "tradeoff",
+    "best_when",
     "alternative",
     "alternative_tradeoff",
+    "alternative_best_when",
     "watch",
 )
 
@@ -385,8 +387,9 @@ def check_changes(changes: Any) -> list[dict]:
         )
         _require(
             all(_is_text(c.get(k)) for k in CHANGE_TEXT_FIELDS),
-            "change action, tradeoff, alternative, alternative_tradeoff "
-            "and watch must be non-empty text",
+            "change action, tradeoff, best_when, alternative, "
+            "alternative_tradeoff, alternative_best_when and watch must be "
+            "non-empty text",
         )
         _require(
             not _same_text(c["action"], c["alternative"]),
@@ -639,8 +642,8 @@ def _situation(finding: dict, focus: str) -> str:
 
 
 # Rules-written prompts for the analyst, not model output and not measured:
-# one alternative explanation per kind of finding, what would tell the two
-# apart, and when each option fits (option a, option b).
+# one alternative explanation per kind of finding and what would tell the
+# two apart.
 ALTERNATIVES = {
     ("press", "against"): (
         "Our build-up got worse on its own (tired legs, loose first "
@@ -670,45 +673,22 @@ ALTERNATIVES = {
         "The shot list and the clips of the big chances.",
     ),
 }
-BEST_WHEN = {
-    ("press", "against"): (
-        "our quick forward can run behind a back line that pushes up",
-        "the keeper and centre-backs are calm on the ball under pressure",
-    ),
-    ("press", "for"): (
-        "the front line still has the legs to keep pressing",
-        "after the hour, or when the lead needs protecting",
-    ),
-    ("threat", "against"): (
-        "their threat really does come from that one channel",
-        "they switch play often, so a winger cannot keep tracking back",
-    ),
-    ("threat", "for"): (
-        "the channel stays open after the break",
-        "they shift their cover to that side",
-    ),
-    ("scoreline", "any"): (
-        "the first-half pattern holds after the break",
-        "they change shape or personnel at the break",
-    ),
-}
 
 
 def rules_notes(findings: list[dict], focus: str) -> dict:
-    """Rules-written alternative, tell-apart and best-when text per finding.
+    """Rules-written alternative explanation and tell-apart text per finding.
 
-    Attached after the model steps, so the model schemas do not change and
-    the page can label this text as written by rules.
+    Attached after the model steps, so the explainer schema does not change
+    and the page can label this text as written by rules. When each option
+    fits ("best when") is part of the coach's output, so it always describes
+    the option it sits next to.
     """
     out = {}
     for f in findings:
-        key = (f["id"], _situation(f, focus))
-        alt, tell = ALTERNATIVES[key]
-        best_a, best_b = BEST_WHEN[key]
+        alt, tell = ALTERNATIVES[(f["id"], _situation(f, focus))]
         out[f["id"]] = {
             "alternative": alt,
             "tell_apart": tell,
-            "best_when": {"a": best_a, "b": best_b},
             "source": "rules",
         }
     return out
@@ -992,6 +972,10 @@ def coach_offline(
                     "Going longer gives up some possession, so expect fewer "
                     "spells of control."
                 ),
+                "best_when": (
+                    "our quick forward can run behind a back line that "
+                    "pushes up"
+                ),
                 "alternative": (
                     f"Play through it: {squad['GK']['name']} waits for "
                     f"{squad['CM']['name']} to drop in and we play short "
@@ -1000,6 +984,10 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Keeps the ball but one loose pass near our box is a "
                     "big chance for them."
+                ),
+                "alternative_best_when": (
+                    "the keeper and centre-backs are calm on the ball under "
+                    "pressure"
                 ),
             }
         )
@@ -1016,12 +1004,16 @@ def coach_offline(
                     "Pressing for another 45 minutes costs legs; the front "
                     "three may need changing before the end."
                 ),
+                "best_when": "the front line still has the legs to press",
                 "alternative": (
                     "Drop into a mid-block after the hour and keep the "
                     "front line fresh for counters."
                 ),
                 "alternative_tradeoff": (
                     "Gives them more of the ball and time to build."
+                ),
+                "alternative_best_when": (
+                    "after the hour, or when the lead needs protecting"
                 ),
             }
         )
@@ -1048,6 +1040,9 @@ def coach_offline(
                     f"Pulling {helper} back costs us an outlet on that side "
                     "when we win the ball."
                 ),
+                "best_when": (
+                    "their threat really does come from that one channel"
+                ),
                 "alternative": (
                     f"Stay compact instead: {squad['DM']['name']} sits in "
                     f"front of the back four so the {threat['channel']} "
@@ -1055,6 +1050,10 @@ def coach_offline(
                 ),
                 "alternative_tradeoff": (
                     "Leaves the full-backs one-on-one if they switch play."
+                ),
+                "alternative_best_when": (
+                    "they switch play often, so a winger cannot keep "
+                    "tracking back"
                 ),
             }
         )
@@ -1072,6 +1071,7 @@ def coach_offline(
                     "If they double up there, our threat drops until we "
                     "switch sides."
                 ),
+                "best_when": "the channel stays open after the break",
                 "alternative": (
                     "Switch the point of attack early and often so their "
                     "cover never settles on one side."
@@ -1079,6 +1079,7 @@ def coach_offline(
                 "alternative_tradeoff": (
                     "Longer switches are harder passes and some will be lost."
                 ),
+                "alternative_best_when": "they shift their cover to that side",
             }
         )
 
@@ -1104,6 +1105,10 @@ def coach_offline(
         alternative_tradeoff = (
             "Uses a substitution early and unsettles the back line."
         )
+        best_when = "they are still useful on the ball with support"
+        alternative_best_when = (
+            "they keep losing it under pressure even with support"
+        )
     else:
         action = (
             "Get one more runner into the box: our best chances came from "
@@ -1114,6 +1119,8 @@ def coach_offline(
             "Keep the shape and work the ball to the byline for cut-backs."
         )
         alternative_tradeoff = "Slower, and fewer shots if they sit deep."
+        best_when = "our chances keep coming from close range"
+        alternative_best_when = "they sit deep and leave the byline open"
     if leading and sum(momentum) < 0:
         action += (
             f" We lead but lost the last {MOMENTUM_WINDOW_MIN} minutes, so "
@@ -1124,8 +1131,10 @@ def coach_offline(
             "finding": "scoreline",
             "action": action,
             "tradeoff": tradeoff,
+            "best_when": best_when,
             "alternative": alternative,
             "alternative_tradeoff": alternative_tradeoff,
+            "alternative_best_when": alternative_best_when,
         }
     )
     watch = watch_targets(facts, findings, focus)
@@ -1344,15 +1353,17 @@ Turn the findings into exactly three changes for the second half, one per
 finding. You advise, the head coach decides, so each change offers two
 options with their trade-off rather than one order. Each option names real
 players from the squad list and is something a coach can say in the dressing
-room. Return a JSON list of {finding, action, tradeoff, alternative,
-alternative_tradeoff, watch}, all strings. finding is the id of the finding
-the change answers ("press", "threat" or "scoreline"), not its title. action
-is the option you recommend and tradeoff its cost; alternative is the other
-option and alternative_tradeoff its cost. alternative must be a genuinely
-different option from action. watch is copied exactly from "watch" for that
-finding, because it is the target the second-half check measures. Quote
-numbers only as they appear in the input; never calculate or invent one. A
-reply with any other number is discarded.
+room. Return a JSON list of {finding, action, tradeoff, best_when,
+alternative, alternative_tradeoff, alternative_best_when, watch}, all strings.
+finding is the id of the finding the change answers ("press", "threat" or
+"scoreline"), not its title. action is the option you recommend, tradeoff its
+cost and best_when the situation it fits best; alternative is the other
+option, alternative_tradeoff its cost and alternative_best_when the situation
+it fits best. Each best_when describes its own option, in a short phrase.
+alternative must be a genuinely different option from action. watch is copied
+exactly from "watch" for that finding, because it is the target the
+second-half check measures. Quote numbers only as they appear in the input;
+never calculate or invent one. A reply with any other number is discarded.
 """
 
 FAN_INSTRUCTIONS = """\
@@ -1431,7 +1442,7 @@ def check_targets(
                 f"at least {minimum} events; too close to call within one "
                 "standard error (square root of the count, per minute)"
             )
-        elif f["team"] == opp:
+        elif fid == "threat" and f["team"] == opp:
             n = metrics.threat_passes(ev, opp)
             value = metrics.threat_channels(ev, opp)[f["channel"]]
             unit = f"threatening passes by {names[opp]}"
@@ -1515,8 +1526,10 @@ def check_verdicts(
 ) -> list[dict]:
     """Reject verifier output that is not one verdict per finding.
 
-    With the checks, also reject "keep" for a target that is not met: a miss,
-    a too-close result or thin evidence goes back to the staff for review.
+    With the checks, also reject "keep" unless the target is met and the
+    call was adopted: a miss, a too-close result, thin evidence or a call
+    that was never adopted goes back to the staff for review. The wording
+    itself is not checked; the page's advice comes from the status in code.
     """
     _require(isinstance(verdicts, list), "verdicts must be a list")
     _require(len(verdicts) == 3, "verdicts must be three items")
@@ -1535,13 +1548,17 @@ def check_verdicts(
         "verdicts must cover each finding once",
     )
     if checks is not None:
-        status = {c["finding"]: c["status"] for c in checks}
+        by_id = {c["finding"]: c for c in checks}
         _require(
             all(
-                v["next"] == "review" or status[v["finding"]] == "met"
+                v["next"] == "review"
+                or (
+                    by_id[v["finding"]]["status"] == "met"
+                    and by_id[v["finding"]].get("adopted", True)
+                )
                 for v in verdicts
             ),
-            "next may be keep only when the target is met",
+            "next may be keep only when an adopted target is met",
         )
     return verdicts
 
@@ -1551,32 +1568,24 @@ def verify_offline(
 ) -> list[dict]:
     """Rule-based verifier: one verdict per check, read from the numbers.
 
-    It never tells the coach to switch: a missed target goes back to the
-    staff, and a too-close or thin result is not a verdict at all.
+    It never names the other option. A missed target goes back to the
+    staff, a too-close or thin result is not a verdict, and a call that was
+    not adopted is reported as monitoring only, with no option advice.
     """
     by_id = {c["finding"]: c for c in changes}
     verdicts = []
     for c in checks:
-        chosen = choices.get(c["finding"], "a")
-        option = by_id[c["finding"]]
-        picked = option["action"] if chosen == "a" else option["alternative"]
+        adopted = c.get("adopted", True)
         goal = "under" if c["direction"] == "below" else "at least"
         measured = (
             f"{c['label']} is {c['value']} from {c['n']} {c['unit']} "
             f"in {c['window']}"
         )
         status = c["status"]
-        if status == "met":
+        if status == "insufficient":
             text = (
-                f"Target met so far: {measured}, {goal} the {c['target']} "
-                f"target. Keep option {chosen.upper()} under review: "
-                f"{picked}"
-            )
-        elif status == "not_met":
-            text = (
-                f"Target not met: {measured}, against a target of {goal} "
-                f"{c['target']}. Review it with the staff before changing "
-                "anything."
+                f"Not enough evidence yet: only {c['n']} {c['unit']} in "
+                f"{c['window']}. Not a verdict; look again later."
             )
         elif status == "too_close":
             text = (
@@ -1584,16 +1593,36 @@ def verify_offline(
                 f"{measured}, against a target of {goal} {c['target']}. "
                 "Not a verdict yet; look again later."
             )
+        elif status == "met":
+            text = f"Target met so far: {measured}, {goal} the {c['target']} "
+            if adopted:
+                chosen = choices.get(c["finding"], "a")
+                option = by_id[c["finding"]]
+                picked = (
+                    option["action"]
+                    if chosen == "a"
+                    else option["alternative"]
+                )
+                text += (
+                    f"target. Keep option {chosen.upper()} under review: "
+                    f"{picked}"
+                )
+            else:
+                text += "target."
         else:
             text = (
-                f"Not enough evidence yet: only {c['n']} {c['unit']} in "
-                f"{c['window']}. Not a verdict; look again later."
+                f"Target not met: {measured}, against a target of {goal} "
+                f"{c['target']}."
             )
+            if adopted:
+                text += " Review it with the staff before changing anything."
+        if not adopted:
+            text = "Monitoring only, no option adopted. " + text
         verdicts.append(
             {
                 "finding": c["finding"],
                 "verdict": text,
-                "next": "keep" if status == "met" else "review",
+                "next": "keep" if status == "met" and adopted else "review",
             }
         )
     return verdicts
@@ -1601,16 +1630,18 @@ def verify_offline(
 
 VERIFY_INSTRUCTIONS = """\
 You are the analyst checking in with the head coach at the given minute of the
-second half. For each finding you get the option the coach chose at half-time,
-the measurable target they were told to watch, and the value measured so far
-("checks", computed from the events), with its status: met, not_met, too_close
-or insufficient. Say in one or two plain sentences what the check shows. A
-too_close or insufficient result is not a verdict: say so, and that it needs
-another look later. Never tell the coach to switch to the other option; a
-missed target goes back to the staff to review. Return a JSON list of
-{finding, verdict, next}, where next is "keep" only when the status is met and
-"review" otherwise. Quote numbers only as they appear in "checks"; never
-calculate or invent one. A reply with any other number is discarded.
+second half. For each finding you get the measurable target they were told to
+watch and the value measured so far ("checks", computed from the events), with
+its status (met, not_met, too_close or insufficient) and whether the staff
+adopted an option for it ("adopted"). "chosen_options" lists only adopted
+options. Say in one or two plain sentences what the check shows. A too_close
+or insufficient result is not a verdict: say so, and that it needs another
+look later. For a call that was not adopted, report the numbers as monitoring
+only and give no option advice. Never tell the coach to switch to the other
+option; a missed target goes back to the staff to review. Return a JSON list
+of {finding, verdict, next}, where next is "keep" only when an adopted target
+is met and "review" otherwise. Quote numbers only as they appear in "checks";
+never calculate or invent one. A reply with any other number is discarded.
 """
 
 
@@ -1622,8 +1653,9 @@ def check_decisions(decisions: Any, watch: dict) -> dict[str, dict]:
 
     Raises:
         ValueError: A decision names an unknown finding, option or status,
-            claims implementation without adoption, or adopted a target that
-            is not the one the check would measure.
+            adopts or confirms a call without naming an option, claims
+            implementation without adoption, or adopted a target that is
+            not the one the check would measure.
     """
     if not isinstance(decisions, dict):
         raise ValueError("decisions must be an object")
@@ -1641,6 +1673,8 @@ def check_decisions(decisions: Any, watch: dict) -> dict[str, dict]:
         implemented = bool(d.get("implemented", False))
         if implemented and status != "adopted":
             raise ValueError(f"{fid}: only an adopted option can be in place")
+        if status == "adopted" and option is None:
+            raise ValueError(f"{fid}: adopting a call needs an option")
         tid = d.get("target_id")
         if tid is not None and tid != watch[fid]["id"]:
             raise ValueError(
@@ -1671,12 +1705,29 @@ async def second_half_check(
 
     The numbers come from code; the verifier agent only words the verdict
     and falls back to rules like every other agent. When the analyst sends
-    a decision record, the options come from it and each adopted target must
-    still be the one the check measures.
+    a decision record, only adopted calls count as chosen options, every
+    other call is monitoring only, and each target must still be the one
+    the check measures. Without a record, every call counts as adopted with
+    the option in `choices` (default a), as older clients expect.
     """
     facts = metrics.half_time_facts(match)
     watch = watch_targets(facts, findings, focus)
-    record = check_decisions(decisions, watch) if decisions else {}
+    record = check_decisions(decisions, watch) if decisions is not None else {}
+    if decisions is not None:
+        for f in FINDING_IDS:
+            record.setdefault(
+                f,
+                {
+                    "option": None,
+                    "status": "open",
+                    "implemented": False,
+                    "target_id": watch[f]["id"],
+                },
+            )
+    adopted = {
+        f: decisions is None or record[f]["status"] == "adopted"
+        for f in FINDING_IDS
+    }
     picked = {f: d["option"] for f, d in record.items() if d["option"]}
     choices = {
         f: picked.get(f) or (choices or {}).get(f, "a") for f in FINDING_IDS
@@ -1688,6 +1739,11 @@ async def second_half_check(
     trace: list[dict] = []
     started = time.perf_counter()
     checks = check_targets(facts, match, findings, focus, until)
+    for c in checks:
+        c["adopted"] = adopted[c["finding"]]
+        c["implemented"] = (
+            record[c["finding"]]["implemented"] if record else None
+        )
     _step(
         trace,
         "stats",
@@ -1700,6 +1756,7 @@ async def second_half_check(
     chosen = {
         f: by_id[f]["action"] if choices[f] == "a" else by_id[f]["alternative"]
         for f in FINDING_IDS
+        if adopted[f]
     }
     verdicts = await _model_or_rules(
         client,
@@ -1711,6 +1768,13 @@ async def second_half_check(
             "focus_team": facts["teams"][focus],
             "minute": until,
             "chosen_options": chosen,
+            "decisions": {
+                f: {
+                    "status": d["status"],
+                    "implemented": d["implemented"],
+                }
+                for f, d in record.items()
+            },
             "watch": {f: w["text"] for f, w in watch.items()},
             "checks": checks,
         },

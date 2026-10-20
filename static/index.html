@@ -870,9 +870,16 @@ function followUp(f, c) {
     const better = x.direction === "below" ? x.value < x.baseline : x.value > x.baseline;
     moved = ` Moved from ${esc(x.baseline)} at the end of the first half (${better ? "better" : "worse"}).`;
   }
-  const next = {
+  // The advice is written here from the status and the decision; the
+  // verifier agent's own wording is shown only under details.
+  const adopted = x.adopted !== false;
+  const next = (adopted ? {
     met: "Keep reviewing; one window is not proof the option worked.",
     not_met: "Review with staff: keep, adjust, or look again at option " + (choice(f) === "a" ? "B" : "A") + " (context, not a recommendation).",
+  } : {
+    met: "Monitoring only: no option was adopted for this call.",
+    not_met: "Monitoring only: no option was adopted, so there is nothing to review yet.",
+  })[x.status] || {
     too_close: "Too close to call after " + x.minutes + " minutes; look again later.",
     insufficient: "Not enough play yet to judge: " + x.n + " " + x.unit + (x.value === null ? ", nothing to measure." : "."),
   }[x.status] || "";
@@ -889,16 +896,16 @@ function followUp(f, c) {
     ${guard}
     <details><summary>Evidence rule and verifier wording</summary>
       <p class="meta">Evidence rule (proposed): ${esc(x.rule)}.</p>
-      <p class="meta">Verifier agent (${esc(agent.backend || "")}) said: ${esc(v.verdict || "")}</p></details>
+      <p class="meta">Verifier agent's wording (${esc(agent.backend || "")}), not the advice above: ${esc(v.verdict || "")}</p></details>
     <p class="meta">The synthetic second half is fixed, so this shows whether the target is being met, not what the option caused.</p></div>`;
 }
 
 function callBody(c, f, x) {
   const p = c.rules || {}, d = dec(c.finding), t = c.target || {};
-  const opt = (o, text, cost) => `<div class="option${d.draft === o ? " chosen" : ""}" data-option="${o}" role="button" tabindex="0" aria-pressed="${d.draft === o}">
+  const opt = (o, text, cost, best) => `<div class="option${d.draft === o ? " chosen" : ""}" data-option="${o}" data-key="opt:${esc(c.finding)}:${o}" role="button" tabindex="0" aria-pressed="${d.draft === o}">
       <b>Option ${o.toUpperCase()}</b>${o === "a" ? '<span class="pick">coach agent\'s pick</span>' : ""}<span class="chosen-mark">✓ drafted</span>
       <p>${esc(text)}</p><p class="cost"><b>Cost</b> ${esc(cost)}</p>
-      <p class="cost"><b>Best when</b> ${esc((p.best_when || {})[o] || "")} <span class="src">rules text</span></p></div>`;
+      <p class="cost"><b>Best when</b> ${esc(best || "")}</p></div>`;
   return `<div class="body">
     <div class="sect"><b>What we saw</b> <span class="src">measured, first half, before and after ${esc(f.minute)}'</span></div>
     <div class="chips">${evidenceChips(f)}</div>
@@ -908,13 +915,13 @@ function callBody(c, f, x) {
       <p><b>What would tell them apart:</b> ${esc(p.tell_apart || "")}</p>
       <p class="src">Written by rules, not by a model and not measured. The data cannot settle it; video can.</p></details>
     <div class="sect"><b>Options</b> <span class="src">pick one to draft; nothing is chosen for you</span></div>
-    <div class="options" data-finding="${esc(c.finding)}">${opt("a", c.action, c.tradeoff)}${opt("b", c.alternative, c.alternative_tradeoff)}</div>
+    <div class="options" data-finding="${esc(c.finding)}">${opt("a", c.action, c.tradeoff, c.best_when)}${opt("b", c.alternative, c.alternative_tradeoff, c.alternative_best_when)}</div>
     <div class="decide" data-finding="${esc(c.finding)}">
       <span class="state"><b>${esc(decisionLabel(c.finding))}</b>${implLabel(c.finding) ? " · " + esc(implLabel(c.finding)) : ""}</span>
-      <button class="btn small" data-act="adopted" ${d.draft ? "" : "disabled"} aria-pressed="${d.status === "adopted"}">Adopt</button>
-      <button class="btn small" data-act="deferred" aria-pressed="${d.status === "deferred"}">Defer</button>
-      <button class="btn small" data-act="rejected" aria-pressed="${d.status === "rejected"}">Reject</button>
-      <label class="impl"><input type="checkbox" data-act="impl" ${d.implemented ? "checked" : ""} ${d.status === "adopted" ? "" : "disabled"}> Confirmed in place at 46'</label>
+      <button class="btn small" data-act="adopted" data-key="act:${esc(c.finding)}:adopted" ${d.draft ? "" : "disabled"} aria-pressed="${d.status === "adopted"}">Adopt</button>
+      <button class="btn small" data-act="deferred" data-key="act:${esc(c.finding)}:deferred" aria-pressed="${d.status === "deferred"}">Defer</button>
+      <button class="btn small" data-act="rejected" data-key="act:${esc(c.finding)}:rejected" aria-pressed="${d.status === "rejected"}">Reject</button>
+      <label class="impl"><input type="checkbox" data-act="impl" data-key="impl:${esc(c.finding)}" ${d.implemented ? "checked" : ""} ${d.status === "adopted" ? "" : "disabled"}> Confirmed in place at 46'</label>
     </div>
     <div class="watch"><b>Watch</b> ${esc(t.text || c.watch)} <span class="src">target ${esc(t.id || "")} · ${esc(t.policy || "")}</span></div>
     ${momentChips(f)}
@@ -927,6 +934,8 @@ function renderOutput(d) {
   const expl = Object.fromEntries(d.explanations.map((x) => [x.id, x]));
   const finds = Object.fromEntries(d.findings.map((x) => [x.id, x]));
   if (d.mode === "analyst") {
+    // Redrawing replaces the controls, so remember which one had focus.
+    const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
     if (!state.first) state.first = d.changes[0].finding;
     const order = [state.first, ...d.changes.map((c) => c.finding).filter((f) => f !== state.first)];
     const byF = Object.fromEntries(d.changes.map((c, i) => [c.finding, { c, n: i + 1 }]));
@@ -934,7 +943,7 @@ function renderOutput(d) {
       const { c, n } = byF[f], fd = finds[f] || {};
       return `<li class="${f === state.first ? "first" : ""}"><span class="num">${n}</span><span class="t">${esc(fd.title || c.action)}</span>
         <span class="st">${esc(decisionLabel(f))}</span>
-        ${f === state.first ? '<span class="pin">Discuss first</span>' : `<button class="btn small" data-first="${esc(f)}">Discuss first</button>`}</li>`;
+        ${f === state.first ? '<span class="pin">Discuss first</span>' : `<button class="btn small" data-first="${esc(f)}" data-key="first:${esc(f)}">Discuss first</button>`}</li>`;
     }).join("");
     $("out").innerHTML = LOADER + `<h2>Three calls · ${esc(d.focus_team)}</h2>
       <ol class="summary">${summary}</ol>
@@ -944,9 +953,11 @@ function renderOutput(d) {
       const { c, n } = byF[f], fd = finds[f] || {}, x = expl[f] || {};
       const concept = x.concept || CONCEPTS[fd.concept] || fd.concept || "";
       const open = f === state.first || state.open.has(f);
-      return `<div class="change${open ? " open" : ""}" data-finding="${esc(f)}"><h3><span class="num">${n}</span><span>${esc(fd.title || c.action)}</span></h3>
+      // After "Discuss first", focus lands on that call's heading (same key).
+      const head = f === state.first ? ` tabindex="-1" data-key="first:${esc(f)}"` : "";
+      return `<div class="change${open ? " open" : ""}" data-finding="${esc(f)}"><h3${head}><span class="num">${n}</span><span>${esc(fd.title || c.action)}</span></h3>
         <div class="tags">${concept ? `<span class="concept">${esc(concept)}</span>` : ""}<span class="tag">${esc(decisionLabel(f))}</span>
-        ${f === state.first ? "" : `<button class="btn small toggle" aria-expanded="${open}">${open ? "Hide" : "Open"}</button>`}</div>
+        ${f === state.first ? "" : `<button class="btn small toggle" data-key="toggle:${esc(f)}" aria-expanded="${open}">${open ? "Hide" : "Open"}</button>`}</div>
         ${open ? callBody(c, fd, x) : ""}</div>`;
     }).join("") + "</div>";
     const out = $("out");
@@ -976,6 +987,10 @@ function renderOutput(d) {
       dec(i.closest(".decide").dataset.finding).implemented = i.checked; clearCheck(); renderOutput(d);
     }));
     $("check60").addEventListener("click", runCheck);
+    if (focusKey) {
+      const el = out.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
+      if (el) el.focus({ preventScroll: true });
+    }
   } else {
     const fan = d.fan, rtl = fan.language === "ar";
     $("out").innerHTML = LOADER + `<h2>Your half-time story · ${esc(d.focus_team)}</h2><div class="fan reveal"${rtl ? ' dir="rtl" lang="ar"' : ""}>
