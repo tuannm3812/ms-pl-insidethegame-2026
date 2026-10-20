@@ -12,7 +12,8 @@ version for each pane.
 | --- | --- | --- | --- |
 | Codex v1 | Standalone coaching workflow concept | [Open HTML](codex-v1/index.html) | Archived; not selected as the base layout |
 | Claude v1 | Claude's full interface before refinement | [Open HTML](claude-v1/index.html) · [notes](claude-v1/notes.md) | Archived (PR #9 at `2719d04`) |
-| Claude v2 | Refine Claude v1 using the agreed coaching workflow ideas | [Open HTML](claude-v2/index.html) · [notes](claude-v2/notes.md) | Awaiting manual review |
+| Claude v2 | Refine Claude v1 using the agreed coaching workflow ideas | [Open HTML](claude-v2/index.html) · [notes](claude-v2/notes.md) | Archived; built into the app at `f15e05e` |
+| Claude v3 | The app after Codex pass 9 and the content audit (decision-aware follow-up, best-when per option, keyboard focus, one display rule, role-led player cards) | [Open HTML](claude-v3/index.html) · [notes](claude-v3/notes.md) | Awaiting manual review (app at `9332995`) |
 
 Codex v1 images: [desktop](codex-v1/desktop.png),
 [mobile](codex-v1/mobile.png), [follow-up](codex-v1/review.png),
@@ -22,7 +23,7 @@ relative links inside those copied notes refer to their original location
 under `docs/prototypes/`. File hashes are in `codex-v1/manifest.json`.
 Codex v1 was saved in Mike's local checkout; it is not yet committed.
 
-Claude v1 and v2 images, the same five views each (seed 27, Riverside,
+Claude v1, v2 and v3 images, the same five views each (seed 27, Riverside,
 1440 x 1000 and 390 x 844): `1-initial.png`, `2-priority-call.png`,
 `3-selected.png`, `4-follow-up.png`, `5-mobile.png`. Each folder has
 `notes.md` (change summary, what is simulated, known issues, checks run),

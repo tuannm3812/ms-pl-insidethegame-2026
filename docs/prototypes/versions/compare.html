@@ -33,10 +33,11 @@
 <script>
   const VERSIONS = [
     ["claude-v1", "Claude v1 · before refinement"],
-    ["claude-v2", "Claude v2 · awaiting review"],
+    ["claude-v2", "Claude v2 · built into the app"],
+    ["claude-v3", "Claude v3 · awaiting review"],
     ["codex-v1", "Codex v1 · concept (local checkout only)"],
   ];
-  const start = ["claude-v1", "claude-v2"];
+  const start = ["claude-v2", "claude-v3"];
   document.querySelectorAll(".pane").forEach((pane, i) => {
     const sel = pane.querySelector("select"), frame = pane.querySelector("iframe"), link = pane.querySelector("a");
     for (const [v, label] of VERSIONS) sel.add(new Option(label, v));
