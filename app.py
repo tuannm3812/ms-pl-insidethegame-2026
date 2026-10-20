@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from halftime import metrics
 from halftime.agents import (
     CHECK_MINUTE,
     backend_name,
@@ -57,6 +58,7 @@ def match_meta(seed: int = DEFAULT_SEED) -> dict:
         "match_id": m["match_id"],
         "teams": m["teams"],
         "final_score": m["final_score"],
+        "formats": metrics.formats(),
     }
 
 

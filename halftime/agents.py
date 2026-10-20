@@ -28,6 +28,7 @@ import os
 import re
 import time
 from collections.abc import Callable
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Annotated, Any
 
 from . import metrics, prematch
@@ -451,12 +452,25 @@ def grounded_numbers(*sources: Any) -> set[float]:
 
     A share such as 0.834 may also appear as a percentage (83 or 83.4).
     """
+
+    def half_up(x: float, places: int) -> float:
+        # The page's display rule, so a number shown there is allowed too.
+        return float(
+            Decimal(str(x)).quantize(
+                Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP
+            )
+        )
+
     allowed = {float(n) for n in FREE_NUMBERS}
     for source in sources:
         for n in _numbers_in(source):
-            forms = {n, round(n), round(n, 1), round(n, 2)}
+            forms = {n} | {
+                f(n, p) for f in (round, half_up) for p in (0, 1, 2)
+            }
             if n <= 1:
-                forms |= {round(100 * n), round(100 * n, 1)}
+                forms |= {
+                    f(100 * n, p) for f in (round, half_up) for p in (0, 1)
+                }
             allowed |= {float(f) for f in forms}
     return allowed
 
@@ -480,6 +494,18 @@ def check_grounded(
 # ---------------------------------------------------------------------------
 # Rule-based versions (offline mode, and the fallback if a model reply breaks)
 # ---------------------------------------------------------------------------
+
+
+def display_summary(summary: dict) -> dict:
+    """Each side's headline stats as the page shows them, for the models."""
+    return {
+        side: {
+            k: metrics.display(k, v)
+            for k, v in stats.items()
+            if k in metrics.METRIC_FORMATS
+        }
+        for side, stats in summary.items()
+    }
 
 
 def _per_min(n: float, minutes: float) -> float:
@@ -722,30 +748,36 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
             "evidence": [
                 {
                     "label": f"{names[presser]} high presses per min",
+                    "metric": "rate_min",
                     "before": b[presser]["high_presses_per_min"],
                     "after": a[presser]["high_presses_per_min"],
                 },
                 {
                     "label": f"{names[victim]} balls lost in own half per min",
+                    "metric": "rate_min",
                     **_own_half_losses(facts, victim),
                 },
                 {
                     "label": f"{names[victim]} passes made under pressure",
+                    "metric": "passes_under_pressure",
                     "before": b[victim]["passes_under_pressure"],
                     "after": a[victim]["passes_under_pressure"],
                 },
                 {
                     "label": f"{names[victim]} pass accuracy under pressure",
+                    "metric": "pass_accuracy_under_pressure",
                     "before": b[victim]["pass_accuracy_under_pressure"],
                     "after": a[victim]["pass_accuracy_under_pressure"],
                 },
                 {
-                    "label": f"{names[victim]} possession %",
+                    "label": f"{names[victim]} possession",
+                    "metric": "possession_pct",
                     "before": b[victim]["possession_pct"],
                     "after": a[victim]["possession_pct"],
                 },
                 {
                     "label": f"{names[victim]} threat (xT) per 10 min",
+                    "metric": "rate_10",
                     "before": _per_10(
                         b[victim]["xt_created"], b[victim]["minutes"]
                     ),
@@ -775,7 +807,8 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
             "team": dominant,
             "title": (
                 f"{names[dominant]} are getting in down the {channel} "
-                f"({share:.0f}% of their threat since {t}')"
+                f"({metrics.display('share_pct', share)} of their threat "
+                f"since {t}')"
                 if share is not None
                 else f"{names[dominant]} have no threatening pass since {t}'"
             ),
@@ -785,13 +818,16 @@ def tactics_offline(facts: dict, match: dict, focus: str) -> list[dict]:
                         f"{names[dominant]} xT share by channel since {t}'"
                     ),
                     "value": channels,
+                    "metric": "share_pct",
                 },
                 {
                     "label": "Main creators (xT since turning point)",
                     "value": {p["name"]: p["xt_created"] for p in creators},
+                    "metric": "xt_created",
                 },
                 {
                     "label": f"{names[dominant]} xT before vs after",
+                    "metric": "xt_created",
                     "before": b[dominant]["xt_created"],
                     "after": a[dominant]["xt_created"],
                 },
@@ -1199,7 +1235,8 @@ def fan_offline(
         if p:
             bits = [
                 f"{p['passes']} passes "
-                f"({round(100 * (p['pass_accuracy'] or 0))}% accurate)"
+                f"({metrics.display('pass_accuracy', p['pass_accuracy'])} "
+                "accurate)"
             ]
             if p["goals"]:
                 bits.append(
@@ -1208,16 +1245,20 @@ def fan_offline(
             if p["shots"]:
                 bits.append(
                     f"{p['shots']} shot{'s' if p['shots'] > 1 else ''} worth "
-                    f"{p['xg']} xG"
+                    f"{metrics.display('xg', p['xg'])} xG"
                 )
             if p["xt_created"] >= 0.1:
                 bits.append("one of the most dangerous passers on the pitch")
-            if p["defensive_actions"]:
+            if p["tackles"] or p["interceptions"]:
                 bits.append(
-                    f"{p['defensive_actions']} tackles and interceptions"
+                    f"{p['tackles']} tackles and {p['interceptions']} "
+                    "interceptions"
                 )
             if p["top_sprint_kmh"]:
-                bits.append(f"top sprint {p['top_sprint_kmh']} km/h")
+                bits.append(
+                    "top sprint "
+                    + metrics.display("top_sprint_kmh", p["top_sprint_kmh"])
+                )
             spotlight = {
                 "player": p["name"],
                 "line": f"{p['name']}: " + ", ".join(bits) + ".",
@@ -1262,27 +1303,24 @@ def overlays(
             "duration_s": 8,
             "type": "stat_bars",
             "title": "First half",
+            # Machine-readable values plus the display text, so a
+            # broadcast graphic shows the same digits as the page.
             "rows": [
                 {
-                    "label": "Possession %",
-                    "home": s["home"]["possession_pct"],
-                    "away": s["away"]["possession_pct"],
-                },
-                {
-                    "label": "xG",
-                    "home": s["home"]["xg"],
-                    "away": s["away"]["xg"],
-                },
-                {
-                    "label": "Threat (xT)",
-                    "home": s["home"]["xt_created"],
-                    "away": s["away"]["xt_created"],
-                },
-                {
-                    "label": "Shots",
-                    "home": s["home"]["shots"],
-                    "away": s["away"]["shots"],
-                },
+                    "label": label,
+                    "metric": key,
+                    **{side: s[side][key] for side in SIDES},
+                    **{
+                        f"{side}_text": metrics.display(key, s[side][key])
+                        for side in SIDES
+                    },
+                }
+                for label, key in (
+                    ("Possession", "possession_pct"),
+                    ("xG", "xg"),
+                    ("Threat (xT)", "xt_created"),
+                    ("Shots", "shots"),
+                )
             ],
         },
         {
@@ -1335,7 +1373,9 @@ any other number is discarded. Return a JSON list; each item needs id,
 concept, team ("home" or "away"), title (one sentence), evidence (list of
 {label, before, after} or {label, value}), minute, and for "threat" also
 channel ("left", "centre" or "right") and creators, for "scoreline" also
-goals_minus_xg and weak_link (a player name or null).
+goals_minus_xg and weak_link (a player name or null). When a number has a
+display form under "display", quote that form (for example a pass accuracy of
+0.789 as 78.9%).
 """
 
 EXPLAINER_INSTRUCTIONS = """\
@@ -1344,7 +1384,8 @@ finding, say in two or three plain sentences why it matters to the result,
 using one lens: "Control vs chaos", "Game rhythm", "Pressure" or "Chance
 quality". Return a JSON list of {id, concept, why_it_matters}. Quote numbers
 only as they appear in the findings or "measurements"; a reply with any other
-number is discarded.
+number is discarded. When a number has a display form under "display", quote
+that form (for example a pass accuracy of 0.789 as 78.9%).
 """
 
 COACH_INSTRUCTIONS = """\
@@ -1373,7 +1414,8 @@ If a favourite player is given, include a spotlight on them using their real
 stats. Return JSON {headline, story (list of 3 short paragraphs), spotlight
 ({player, line} or null), watch_for, language}. Quote numbers only as they
 appear in the input; never calculate or invent one. A reply with any other
-number is discarded.
+number is discarded. When a number has a display form under "display", quote
+that form (for example a pass accuracy of 0.789 as 78.9%).
 """
 
 
@@ -1437,6 +1479,7 @@ def check_targets(
                 late[side]["turnovers_in_own_half"], late[side]["minutes"]
             )
             se = metrics.rate_se(n, minutes)
+            metric = "rate_min"
             minimum = metrics.MIN_RATE_EVENTS
             rule = (
                 f"at least {minimum} events; too close to call within one "
@@ -1446,6 +1489,7 @@ def check_targets(
             n = metrics.threat_passes(ev, opp)
             value = metrics.threat_channels(ev, opp)[f["channel"]]
             unit = f"threatening passes by {names[opp]}"
+            metric = "share_pct"
             baseline = metrics.threat_channels(late_ev, opp)[f["channel"]]
             minimum = metrics.MIN_SHARE_PASSES
             rule = (
@@ -1456,6 +1500,7 @@ def check_targets(
             n = metrics.threat_passes(ev, focus)
             value = _per_10(summary[focus]["xt_created"], minutes)
             unit = "threatening passes"
+            metric = "rate_10"
             baseline = late_xt_per_10(focus)
             minimum = metrics.MIN_SHARE_PASSES
             rule = (
@@ -1469,6 +1514,7 @@ def check_targets(
             target = round(target * minutes / 45, 2)
             label = f"{label} (target paced to {until}')"
             unit = f"shots by {names[opp]}"
+            metric = "xg"
             baseline = None
             minimum = metrics.MIN_SHOTS
             rule = (
@@ -1483,6 +1529,7 @@ def check_targets(
             passes = metrics.threat_passes(ev, focus)
             guardrail = {
                 "label": f"{names[focus]} threat (xT) per 10 min",
+                "metric": "rate_10",
                 "value": _per_10(summary[focus]["xt_created"], minutes),
                 "reference": late_xt_per_10(focus),
                 "reference_label": f"{tp['minute']}' to half-time",
@@ -1498,6 +1545,7 @@ def check_targets(
                 "finding": fid,
                 "target_id": w["id"],
                 "label": label,
+                "metric": metric,
                 "value": value,
                 "target": target,
                 "direction": direction,
@@ -1577,8 +1625,11 @@ def verify_offline(
     for c in checks:
         adopted = c.get("adopted", True)
         goal = "under" if c["direction"] == "below" else "at least"
+        metric = c.get("metric", "")
+        value = metrics.display(metric, c["value"])
+        target = metrics.display(metric, c["target"])
         measured = (
-            f"{c['label']} is {c['value']} from {c['n']} {c['unit']} "
+            f"{c['label']} is {value} from {c['n']} {c['unit']} "
             f"in {c['window']}"
         )
         status = c["status"]
@@ -1590,11 +1641,11 @@ def verify_offline(
         elif status == "too_close":
             text = (
                 f"Too close to call after {c['minutes']} minutes: "
-                f"{measured}, against a target of {goal} {c['target']}. "
+                f"{measured}, against a target of {goal} {target}. "
                 "Not a verdict yet; look again later."
             )
         elif status == "met":
-            text = f"Target met so far: {measured}, {goal} the {c['target']} "
+            text = f"Target met so far: {measured}, {goal} the {target} "
             if adopted:
                 chosen = choices.get(c["finding"], "a")
                 option = by_id[c["finding"]]
@@ -1612,7 +1663,7 @@ def verify_offline(
         else:
             text = (
                 f"Target not met: {measured}, against a target of {goal} "
-                f"{c['target']}."
+                f"{target}."
             )
             if adopted:
                 text += " Review it with the staff before changing anything."
@@ -1777,6 +1828,13 @@ async def second_half_check(
             },
             "watch": {f: w["text"] for f, w in watch.items()},
             "checks": checks,
+            "display": {
+                c["finding"]: {
+                    k: metrics.display(c["metric"], c[k])
+                    for k in ("value", "target")
+                }
+                for c in checks
+            },
         },
         lambda: verify_offline(checks, changes, choices),
         lambda out: check_verdicts(out, checks),
@@ -1911,6 +1969,7 @@ async def half_time_briefing(
         )
     }
     slim["focus_team"] = focus
+    slim["display"] = display_summary(facts["summary"])
     # Code-computed evidence for each finding, so the model can quote
     # measured rates and shares instead of working them out.
     rules_findings = tactics_offline(facts, match, focus)
@@ -1964,6 +2023,7 @@ async def half_time_briefing(
         "findings": findings,
         "explanations": explanations,
         "team_report": metrics.team_report(facts, focus),
+        "formats": metrics.formats(),
         "prematch": prematch.compare(match, focus),
         "player_cards": metrics.player_cards(
             metrics.window(match["events"]), match, focus
@@ -2023,6 +2083,7 @@ async def half_time_briefing(
                 "summary": facts["summary"],
                 "findings": findings,
                 "favourite_player": players.get(player) if player else None,
+                "display": display_summary(facts["summary"]),
                 "goals": [
                     m for m in facts["key_moments"] if m["kind"] == "goal"
                 ],

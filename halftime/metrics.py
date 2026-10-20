@@ -6,10 +6,99 @@ grounded: the language model explains, it never invents a statistic.
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from .xt import pass_xt
 
 DEFENSIVE_ACTIONS = {"tackle", "interception", "foul"}
 SIDES = ("home", "away")
+
+
+# One display rule per kind of metric: (decimals, scale, unit). Values keep
+# their calculation precision; these apply only when a number is shown, in
+# Python text and, through the briefing's "formats", on the page.
+FORMAT_KINDS = {
+    "count": (0, 1, ""),
+    "fraction_pct": (1, 100, "%"),
+    "pct": (1, 1, "%"),
+    "xg": (2, 1, ""),
+    "xt": (3, 1, ""),
+    "rate_min": (2, 1, "/min"),
+    "rate_10": (2, 1, " per 10 min"),
+    # A rate whose unit is stated beside it (a table column or footnote).
+    "rate": (2, 1, ""),
+    "ppda": (1, 1, ""),
+    "speed": (1, 1, " km/h"),
+    "mean": (1, 1, ""),
+}
+METRIC_FORMATS = {
+    **dict.fromkeys(
+        (
+            "goals",
+            "shots",
+            "shots_on_target",
+            "big_chances",
+            "passes",
+            "passes_complete",
+            "passes_under_pressure",
+            "pressures",
+            "high_presses",
+            "turnovers_in_own_half",
+            "lost_ball_in_own_half",
+            "defensive_actions",
+            "tackles",
+            "interceptions",
+            "fouls",
+            "actions",
+        ),
+        "count",
+    ),
+    "pass_accuracy": "fraction_pct",
+    "pass_accuracy_under_pressure": "fraction_pct",
+    "possession_pct": "pct",
+    "share_pct": "pct",
+    "xg": "xg",
+    "xg_conceded": "xg",
+    "xt_created": "xt",
+    "ppda": "ppda",
+    "top_sprint_kmh": "speed",
+    "top_speed_kmh": "speed",
+}
+
+
+def display(key: str, value: float | None, kind: str | None = None) -> str:
+    """Format a metric for display: one rule per kind, rounding half up.
+
+    Args:
+        key: Metric key, looked up in `METRIC_FORMATS`.
+        value: The value; None shows as "n/a", a measured zero as 0.
+        kind: A `FORMAT_KINDS` entry that overrides the key's own, e.g.
+            "rate_10" for a per-10-minute split or "mean" for a simulated
+            average of a count.
+
+    Returns:
+        The value with fixed decimals and its unit, or the plain value for
+        a key without a rule.
+    """
+    if value is None:
+        return "n/a"
+    # A key without its own rule may name a kind directly ("rate_min").
+    spec = FORMAT_KINDS.get(kind or METRIC_FORMATS.get(key, key))
+    if spec is None:
+        return str(value)
+    decimals, scale, unit = spec
+    step = Decimal(1).scaleb(-decimals)
+    exact = Decimal(str(value)) * scale
+    q = exact.quantize(step, rounding=ROUND_HALF_UP)
+    if exact > 0 and q == 0:
+        # A small positive value must not look like a measured zero.
+        return f"<{step}{unit}"
+    return f"{q}{unit}"
+
+
+def formats() -> dict:
+    """The display rules for the page, so it formats exactly as Python does."""
+    return {"kinds": FORMAT_KINDS, "keys": METRIC_FORMATS}
 
 
 def other(side: str) -> str:
@@ -69,7 +158,7 @@ def press_resistance(passes: list[dict]) -> dict:
     return {
         "passes_under_pressure": len(pressured),
         "pass_accuracy_under_pressure": (
-            round(len(done) / len(pressured), 3) if pressured else None
+            round(len(done) / len(pressured), 6) if pressured else None
         ),
     }
 
@@ -97,7 +186,7 @@ def team_summary(events: list[dict], side: str) -> dict:
         "xg": round(sum(e["xg"] for e in shots), 2),
         "big_chances": sum(1 for e in shots if e["xg"] >= 0.2),
         "passes": len(passes),
-        "pass_accuracy": round(len(done) / len(passes), 3) if passes else None,
+        "pass_accuracy": round(len(done) / len(passes), 6) if passes else None,
         "avg_pass_length_m": round(
             sum(e["length_m"] for e in passes) / len(passes), 1
         )
@@ -232,6 +321,9 @@ def player_stats(events: list[dict], match: dict) -> dict:
             "xg": 0.0,
             "goals": 0,
             "defensive_actions": 0,
+            "tackles": 0,
+            "interceptions": 0,
+            "fouls": 0,
             "pressures": 0,
             "top_sprint_kmh": None,
             "lost_ball_in_own_half": 0,
@@ -253,7 +345,14 @@ def player_stats(events: list[dict], match: dict) -> dict:
         elif t == "goal":
             s["goals"] += 1
         elif t in DEFENSIVE_ACTIONS:
+            # The broad count (fouls included, as PPDA uses) plus each kind,
+            # so a card can say "tackles" without counting fouls.
             s["defensive_actions"] += 1
+            s[
+                {"tackle": "tackles", "interception": "interceptions"}.get(
+                    t, "fouls"
+                )
+            ] += 1
         elif t == "pressure":
             s["pressures"] += 1
         elif t == "sprint":
@@ -272,8 +371,10 @@ def player_stats(events: list[dict], match: dict) -> dict:
     for s in stats.values():
         s["xt_created"] = round(s["xt_created"], 3)
         s["xg"] = round(s["xg"], 2)
+        # Kept precise: 35 of 44 is 79.5%, which a value stored as 0.80
+        # would show as 80.0%.
         s["pass_accuracy"] = (
-            round(s["passes_complete"] / s["passes"], 2)
+            round(s["passes_complete"] / s["passes"], 6)
             if s["passes"]
             else None
         )
@@ -365,10 +466,6 @@ def player_cards(events: list[dict], match: dict, side: str) -> list[dict]:
         (p["id"] for p in squad),
         key=lambda pid: -stats[pid]["xt_created"],
     )
-    losses_rank = sorted(
-        (p["id"] for p in squad),
-        key=lambda pid: -stats[pid]["lost_ball_in_own_half"],
-    )
     cards = []
     for p in squad:
         st, hm = stats[p["id"]], heat[p["id"]]
@@ -381,54 +478,85 @@ def player_cards(events: list[dict], match: dict, side: str) -> list[dict]:
                 "stats": st,
                 "heatmap": hm,
                 "xt_rank": xt_rank.index(p["id"]) + 1,
-                "insight": _player_insight(
-                    p,
-                    st,
-                    hm,
-                    xt_rank.index(p["id"]) + 1,
-                    losses_rank.index(p["id"]) + 1,
-                ),
+                "insight": _player_insight(p, st, hm),
             }
         )
     return cards
 
 
-def _ordinal(n: int) -> str:
-    if 10 <= n % 100 <= 20:
-        return f"{n}th"
-    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+# Role families for player insights. Position alone decides which measured
+# numbers lead; no claim goes beyond the card's own stats.
+ROLE_FAMILIES = {
+    "GK": "gk",
+    "CB": "cb",
+    "RB": "fb",
+    "LB": "fb",
+    "DM": "dm",
+    "CM": "cm",
+    "RW": "winger",
+    "LW": "winger",
+    "ST": "st",
+}
 
 
-def _player_insight(
-    p: dict, st: dict, hm: dict, xt_rank: int, losses_rank: int
-) -> str:
-    """Two plain sentences on where a player worked and what stood out."""
-    name = p["name"]
+def _player_insight(p: dict, st: dict, hm: dict) -> str:
+    """Two or three plain sentences, led by what matters for the position.
+
+    Uses only the card's stats and heatmap, formatted with `display`. Event
+    locations are recorded actions, not time spent or distance covered.
+    """
+    name, pos = p["name"], p["position"]
     if not hm["actions"]:
-        return f"{name} was barely involved in the first half."
-    # Depth only: the generator picks who has the ball by third, not by
-    # flank, so a player's left-right spread is not meaningful yet.
+        return f"{name} ({pos}) had no recorded actions in the first half."
+
+    def n(key: str) -> str:
+        return display(key, st[key])
+
+    passing = (
+        f"completed {n('passes_complete')} of {n('passes')} passes "
+        f"({n('pass_accuracy')})"
+        if st["passes"]
+        else "made no passes"
+    )
+    losses = st["lost_ball_in_own_half"]
+    lost = (
+        f"{losses} own-half loss{'es' if losses != 1 else ''} "
+        f"{'were' if losses != 1 else 'was'} attributed to {name}"
+    )
+    defending = (
+        f"{n('tackles')} tackle{'s' if st['tackles'] != 1 else ''} and "
+        f"{n('interceptions')} interception"
+        f"{'s' if st['interceptions'] != 1 else ''}"
+    )
+    shooting = (
+        f"{n('shots')} shot{'s' if st['shots'] != 1 else ''} worth "
+        f"{n('xg')} xG and {n('goals')} goal{'s' if st['goals'] != 1 else ''}"
+        if st["shots"]
+        else "no shots"
+    )
+    threat = f"created {n('xt_created')} xT"
+    role = ROLE_FAMILIES.get(pos, "other")
+    lead = {
+        "gk": f"{name} ({pos}) {passing}; {lost}.",
+        "cb": f"{name} ({pos}) made {defending}; {lost}. In build-up, "
+        f"{passing}.",
+        "fb": f"{name} ({pos}) {threat} and made {defending}; {passing}.",
+        "dm": f"{name} ({pos}) {passing}; {lost}. Without the ball: "
+        f"{defending}.",
+        "cm": f"{name} ({pos}) {threat} and {passing}; "
+        f"{n('pressures')} pressures.",
+        "winger": f"{name} ({pos}) {threat} and had {shooting}.",
+        "st": f"{name} ({pos}) recorded {shooting}. In link play, {passing}; "
+        f"{n('pressures')} pressures.",
+        "other": f"{name} ({pos}) {passing}; {threat}.",
+    }[role]
     third = max(hm["thirds_pct"], key=hm["thirds_pct"].get)
     where = (
-        f"{name} did {hm['thirds_pct'][third]:g}% of their work in the "
-        f"{third} third"
+        f"{display('actions', hm['actions'])} recorded actions, "
+        f"{display('share_pct', hm['thirds_pct'][third])} in the {third} "
+        "third."
     )
-    if st["goals"]:
-        what = f"Scored {st['goals']} from {st['xg']} xG."
-    elif xt_rank <= 2 and st["xt_created"] > 0:
-        what = (
-            f"Created {st['xt_created']} xT, {_ordinal(xt_rank)} in the team."
-        )
-    elif losses_rank == 1 and st["lost_ball_in_own_half"]:
-        what = (
-            f"Lost the ball in our half {st['lost_ball_in_own_half']} "
-            "times, the most in the team."
-        )
-    elif st["pressures"] >= 8:
-        what = f"Pressed {st['pressures']} times."
-    else:
-        what = f"Completed {st['passes_complete']} of {st['passes']} passes."
-    return f"{where} ({hm['actions']} actions). {what}"
+    return f"{lead} {where}"
 
 
 def key_moments(events: list[dict], limit: int = 8) -> list[dict]:

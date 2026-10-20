@@ -430,6 +430,21 @@ document.addEventListener("DOMContentLoaded", () => { if (matchMedia("(max-width
 const state = { mode: "analyst", focus: "home", player: "", lang: "en", data: null, meta: null, req: 0, replaying: false, choices: {}, check: null, checkReq: 0, card: null, dec: {}, first: null, open: new Set() };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// fmt-start: one display rule per metric, from halftime/metrics.py (served in
+// /api/match and the briefing as "formats"), rounding half up like Python's
+// Decimal so the page and the agents' text show the same digits.
+function fmtWith(F, key, v, kind) {
+  if (v === null || v === undefined) return "n/a";
+  const spec = F && F.kinds[kind || F.keys[key] || key];
+  if (!spec || typeof v !== "number") return String(v);
+  const [dp, scale, unit] = spec;
+  const x = v * scale, a = Math.abs(x);
+  const r = Number(Math.round(Number(a.toFixed(12) + "e" + dp)) + "e-" + dp);
+  if (x > 0 && r === 0) return "<" + (1 / 10 ** dp).toFixed(dp) + unit;
+  return (x < 0 && r !== 0 ? "-" : "") + r.toFixed(dp) + unit;
+}
+// fmt-end
+const fmt = (key, v, kind) => fmtWith((state.meta && state.meta.formats) || (state.data && state.data.formats), key, v, kind);
 const tip = $("tip");
 function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 12, innerWidth - 250) + "px"; tip.style.top = (e.clientY + 12) + "px"; }
@@ -585,12 +600,15 @@ function render() {
   $("tvPlay").disabled = false;
   $("overlay").textContent = JSON.stringify(d.overlays, null, 2);
   $("table").innerHTML = `<table class="data"><tr><th>Minutes</th><th>Home poss %</th><th>Home xT</th><th>Away xT</th><th>Momentum</th><th>Changes/min</th></tr>` +
-    d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${w.home.possession_pct}</td><td>${w.home.xt_created}</td><td>${w.away.xt_created}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
+    d.timeline.map((w) => `<tr><td>${w.from}–${w.to}</td><td>${fmt("possession_pct", w.home.possession_pct)}</td><td>${fmt("xt_created", w.home.xt_created)}</td><td>${fmt("xt_created", w.away.xt_created)}</td><td>${w.momentum}</td><td>${w.possession_changes_per_min}</td></tr>`).join("") + "</table>";
 }
 
 // Pre-match vs now: each metric's typical range from simulations of the two
 // pre-match styles, the expected value (tick) and the real first half (dot).
-const num = (v) => +v.toFixed(Math.abs(v) >= 10 ? 1 : 2);
+// Expected values are simulated means, so a count shows one decimal there;
+// the range ends and the actual value are observed values in the metric's own
+// format.
+const meanKind = (key) => (((state.meta && state.meta.formats) || {}).keys || {})[key] === "count" ? "mean" : undefined;
 const STYLE_WORD = (v) => (v >= 0.6 ? "high" : v >= 0.35 ? "medium" : "low");
 function renderPrematch(d) {
   const p = d.prematch;
@@ -606,7 +624,7 @@ function renderPrematch(d) {
     const dot = r.good_for_focus === null ? "var(--text-secondary)" : r.good_for_focus ? "var(--hi)" : "var(--away)";
     return `<div class="prerow"><div>${esc(r.label)}<span class="who">${esc(d.teams[r.side])}</span></div>
       <div class="range" aria-hidden="true"><span class="band" style="left:${X(r.low)}%;width:${Math.max(1, X(r.high) - X(r.low))}%"></span><span class="tick" style="left:${X(r.expected)}%"></span><span class="dot" style="left:${X(r.actual)}%;background:${dot}"></span></div>
-      <div class="val">exp. ${esc(num(r.expected))} <span class="muted">(${esc(num(r.low))}–${esc(num(r.high))})</span> · <b class="${cls}">${esc(r.actual)}</b></div></div>`;
+      <div class="val">exp. ${esc(fmt(r.key, r.expected, meanKind(r.key)))} <span class="muted">(${esc(fmt(r.key, r.low))}–${esc(fmt(r.key, r.high))})</span> · <b class="${cls}">${esc(fmt(r.key, r.actual))}</b></div></div>`;
   };
   const changed = p.changes.map((c) => p.rows.find((r) => r.side === c.side && r.key === c.key));
   const rest = p.rows.filter((r) => r.verdict === "as_expected");
@@ -639,6 +657,20 @@ function renderPlayers(d) {
   drawPlayerCard(d, cards.find((c) => c.id === state.card));
 }
 
+// Chip order by role: what matters for the position comes first; every chip
+// is still shown.
+const ROLE_ORDER = {
+  gk: ["passes", "lost", "interceptions", "tackles", "fouls", "pressures", "xt", "shots"],
+  cb: ["tackles", "interceptions", "lost", "passes", "fouls", "pressures", "xt", "shots"],
+  fb: ["xt", "tackles", "interceptions", "passes", "pressures", "lost", "fouls", "shots"],
+  dm: ["passes", "lost", "tackles", "interceptions", "pressures", "xt", "fouls", "shots"],
+  cm: ["xt", "passes", "pressures", "tackles", "interceptions", "lost", "fouls", "shots"],
+  winger: ["xt", "shots", "passes", "pressures", "lost", "tackles", "interceptions", "fouls"],
+  st: ["shots", "passes", "pressures", "xt", "lost", "tackles", "interceptions", "fouls"],
+  other: ["passes", "xt", "shots", "pressures", "tackles", "interceptions", "fouls", "lost"],
+};
+const ROLE_CHIPS = { GK: ROLE_ORDER.gk, CB: ROLE_ORDER.cb, RB: ROLE_ORDER.fb, LB: ROLE_ORDER.fb, DM: ROLE_ORDER.dm,
+                     CM: ROLE_ORDER.cm, RW: ROLE_ORDER.winger, LW: ROLE_ORDER.winger, ST: ROLE_ORDER.st, other: ROLE_ORDER.other };
 const ordinal = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"));
 
 function drawPlayerCard(d, c) {
@@ -669,23 +701,25 @@ function drawPlayerCard(d, c) {
   for (const x0 of [0, 525 - 82.5]) el("rect", { x: x0, y: 170 - 100.75, width: 82.5, height: 201.5, ...line }, svg);
   el("text", { x: 262.5, y: 355, "text-anchor": "middle" }, svg).textContent = "Attacking →";
   const t = hm.thirds_pct;
-  const acc = st.pass_accuracy === null ? "n/a" : Math.round(st.pass_accuracy * 100) + "%";
-  const chips = [
-    ["Passes", `${st.passes_complete}/${st.passes} (${acc})`],
-    ["Threat (xT)", `${st.xt_created} · ${ordinal(c.xt_rank)} in team`],
-    ["Shots", `${st.shots} (xG ${st.xg})`],
-    ["Pressures", st.pressures],
-    ["Tackles + interceptions", st.defensive_actions],
-    ["Lost in own half", st.lost_ball_in_own_half],
-  ];
-  if (st.top_sprint_kmh) chips.push(["Top sprint", st.top_sprint_kmh + " km/h"]);
+  const all = {
+    passes: ["Passes", `${fmt("passes_complete", st.passes_complete)}/${fmt("passes", st.passes)} (${fmt("pass_accuracy", st.pass_accuracy)})`],
+    xt: ["Threat (xT)", `${fmt("xt_created", st.xt_created)} · ${ordinal(c.xt_rank)} in team`],
+    shots: ["Shots", `${fmt("shots", st.shots)} (xG ${fmt("xg", st.xg)})`],
+    pressures: ["Pressures", fmt("pressures", st.pressures)],
+    tackles: ["Tackles", fmt("tackles", st.tackles)],
+    interceptions: ["Interceptions", fmt("interceptions", st.interceptions)],
+    fouls: ["Fouls", fmt("fouls", st.fouls)],
+    lost: ["Lost in own half", fmt("lost_ball_in_own_half", st.lost_ball_in_own_half)],
+  };
+  const chips = (ROLE_CHIPS[c.position] || ROLE_CHIPS.other).map((k) => all[k]);
+  if (st.top_sprint_kmh) chips.push(["Top sprint", fmt("top_sprint_kmh", st.top_sprint_kmh)]);
   $("pcard").innerHTML = `<div class="pitchwrap"></div><div>
     <h3>${esc(c.name)} <span class="muted">#${c.number} · ${esc(c.position)}</span></h3>
     <p class="insight">${esc(c.insight)}</p>
     <div class="chips">${chips.map(([k, v]) => `<span class="chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
     <div class="depth" aria-hidden="true"><span style="flex:${t.defensive};background:${color};opacity:.35"></span><span style="flex:${t.middle};background:${color};opacity:.65"></span><span style="flex:${t.final};background:${color}"></span></div>
-    <div class="depthlab"><span>Own third ${t.defensive}%</span><span>Middle ${t.middle}%</span><span>Final third ${t.final}%</span></div>
-    <p class="pnote">${hm.actions} first-half actions: passes, shots, pressures, tackles and interceptions where they happened, plus passes received. Event data, not tracking; the synthetic generator models depth, not which flank a player plays on.</p></div>`;
+    <div class="depthlab"><span>Own third ${fmt("share_pct", t.defensive)}</span><span>Middle ${fmt("share_pct", t.middle)}</span><span>Final third ${fmt("share_pct", t.final)}</span></div>
+    <p class="pnote">${hm.actions} first-half recorded actions: passes, shots, pressures, tackles, interceptions and fouls where they happened, plus passes received. Event data, not tracking; the synthetic generator models depth, not which flank a player plays on.</p></div>`;
   $("pcard").querySelector(".pitchwrap").appendChild(svg);
 }
 
@@ -697,7 +731,6 @@ function renderTeam(d) {
   $("teamCard").hidden = d.mode !== "analyst" || !r;
   if (!r || d.mode !== "analyst") return;
   const opp = d.focus === "home" ? "away" : "home", t = r.turning_point;
-  const fmt = (v) => (v === null || v === undefined ? "n/a" : v);
   const short = (side) => (state.meta && state.meta.teams[side].short) || d.teams[side];
   $("teamHead").textContent = `Team report · ${d.focus_team}`;
   const table = (title, rows) => `<div><h3>${title}</h3><table class="report">
@@ -709,8 +742,11 @@ function renderTeam(d) {
         arrow = rose ? "▲" : "▼";
         cls = rose === (x.better === "higher") ? "up" : "down";
       }
-      return `<tr><td>${esc(x.label)}</td><td><b>${esc(fmt(x.us))}</b></td><td>${esc(fmt(x.them))}</td>
-        <td>${esc(fmt(x.us_before))} <span class="${cls}">${arrow}</span> ${esc(fmt(x.us_after))}${x.split_unit ? `<span class="unit">*</span>` : ""}</td></tr>`;
+      // Split values are per-10-minute rates where the count depends on the
+      // window; plain metric format otherwise.
+      const sk = x.split_unit ? "rate" : undefined;
+      return `<tr><td>${esc(x.label)}</td><td><b>${esc(fmt(x.key, x.us))}</b></td><td>${esc(fmt(x.key, x.them))}</td>
+        <td>${esc(fmt(x.key, x.us_before, sk))} <span class="${cls}">${arrow}</span> ${esc(fmt(x.key, x.us_after, sk))}${x.split_unit ? `<span class="unit">*</span>` : ""}</td></tr>`;
     }).join("") + "</table></div>";
   $("team").innerHTML = table("Attacking", r.attack) + table("Defending", r.defence);
   $("team").insertAdjacentHTML("beforeend", `<p class="teamnote" style="grid-column:1/-1">Green arrows are changes that help ${esc(d.focus_team)}, red ones hurt. * Counts are per 10 minutes either side of the turning point at ${t}', so the two spells compare fairly. PPDA is opponent passes per defensive action: lower means a more intense press.</p>`);
@@ -734,7 +770,7 @@ function drawMomentum(tl, tp, upto = 45) {
     el("rect", { x, y: v >= 0 ? mid - hgt : mid, width: bw - 6, height: hgt, rx: 4,
                  fill: v >= 0 ? "var(--home)" : "var(--away)" }, g);
     const hit = el("rect", { x: L + i * bw, y: T, width: bw, height: H - T - B, fill: "transparent" }, g);
-    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${w.home.xt_created}, xG ${w.home.xg}<br>Away xT ${w.away.xt_created}, xG ${w.away.xg}<br>Home possession ${w.home.possession_pct}%`));
+    hit.addEventListener("mousemove", (e) => showTip(e, `<b>${w.from}–${w.to}'</b><br>Home xT ${fmt("xt_created", w.home.xt_created)}, xG ${fmt("xg", w.home.xg)}<br>Away xT ${fmt("xt_created", w.away.xt_created)}, xG ${fmt("xg", w.away.xg)}<br>Home possession ${fmt("possession_pct", w.home.possession_pct)}`));
     hit.addEventListener("mouseleave", hideTip);
   });
   if (tp && tp < upto) {
@@ -762,26 +798,27 @@ function drawPitch(shots, teams, upto = 46) {
     const r = 5 + Math.sqrt(sh.xg) * 18;
     const c = el("circle", { cx: x, cy: y, r, fill: goal ? color : "transparent", "fill-opacity": goal ? 0.9 : 0,
                             stroke: color, "stroke-width": 2 }, svg);
-    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${sh.xg} · ${esc(sh.outcome.replace("_", " "))}`));
+    c.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(sh.player)}</b> ${sh.minute}'<br>${esc(teams[sh.team])}<br>xG ${fmt("xg", sh.xg)} · ${esc(sh.outcome.replace("_", " "))}`));
     c.addEventListener("mouseleave", hideTip);
   }
 }
 
-const BAR_ROWS = [["Possession %", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
-                  ["Shots", "shots"], ["Pass accuracy %", "pass_accuracy", 100], ["High presses", "high_presses"]];
+const BAR_ROWS = [["Possession", "possession_pct"], ["Expected goals (xG)", "xg"], ["Threat created (xT)", "xt_created"],
+                  ["Shots", "shots"], ["Pass accuracy", "pass_accuracy"], ["High presses", "high_presses"]];
 function drawBars(sum) {
-  $("bars").innerHTML = BAR_ROWS.map(([label, k, mul]) => {
-    const h = +(sum.home[k] * (mul || 1)).toFixed(mul ? 0 : 2), a = +(sum.away[k] * (mul || 1)).toFixed(mul ? 0 : 2);
-    const tot = h + a || 1;
-    return `<div class="row"><div class="label">${label}</div><span class="v">${h}</span>
+  $("bars").innerHTML = BAR_ROWS.map(([label, k]) => {
+    const h = sum.home[k] || 0, a = sum.away[k] || 0, tot = h + a || 1;
+    return `<div class="row"><div class="label">${label}</div><span class="v">${esc(fmt(k, sum.home[k]))}</span>
       <div class="track"><span style="flex:${h / tot};background:var(--home)"></span><span style="flex:${a / tot};background:var(--away)"></span></div>
-      <span class="v r">${a}</span></div>`;
+      <span class="v r">${esc(fmt(k, sum.away[k]))}</span></div>`;
   }).join("");
 }
 
 function evidenceChips(f) {
-  const show = (x) => (x === null || x === undefined ? "n/a" : x);
+  // Items tagged with a metric use its display rule; model items without one
+  // show as given.
   return (f.evidence || []).map((e) => {
+    const show = (x) => (e.metric ? fmt(e.metric, x) : x === null || x === undefined ? "n/a" : x);
     if ("before" in e) return `<span class="chip">${esc(e.label)}: ${esc(show(e.before))} → <b>${esc(show(e.after))}</b></span>`;
     const v = e.value && typeof e.value === "object" ? Object.entries(e.value).map(([k, x]) => `${k} ${show(x)}`).join(", ") : show(e.value);
     return `<span class="chip">${esc(e.label)}: <b>${esc(v)}</b></span>`;
@@ -868,7 +905,7 @@ function followUp(f, c) {
   let moved = "";
   if (x.baseline != null && x.value != null && x.value !== x.baseline) {
     const better = x.direction === "below" ? x.value < x.baseline : x.value > x.baseline;
-    moved = ` Moved from ${esc(x.baseline)} at the end of the first half (${better ? "better" : "worse"}).`;
+    moved = ` Moved from ${esc(fmt(x.metric, x.baseline))} at the end of the first half (${better ? "better" : "worse"}).`;
   }
   // The advice is written here from the status and the decision; the
   // verifier agent's own wording is shown only under details.
@@ -887,10 +924,10 @@ function followUp(f, c) {
     ? (d.implemented ? "Adopted and in place from 46'." : "Adopted, but not confirmed in place, so read this with care.")
     : "Not adopted. Shown for monitoring only.";
   const guard = g
-    ? `<p class="meta"><b>Cost check</b> ${esc(g.label)}: <b>${esc(g.value)}</b> against ${esc(g.reference)} from ${esc(g.reference_label)}${g.enough ? "" : " (too few passes to read)"}. ${esc(g.why)} <i>Proposed policy; a comparison, not a pass or fail.</i></p>`
+    ? `<p class="meta"><b>Cost check</b> ${esc(g.label)}: <b>${esc(fmt(g.metric, g.value))}</b> against ${esc(fmt(g.metric, g.reference))} from ${esc(g.reference_label)}${g.enough ? "" : " (too few passes to read)"}. ${esc(g.why)} <i>Proposed policy; a comparison, not a pass or fail.</i></p>`
     : `<p class="meta"><b>Cost check</b> No measurable cost defined for this call.</p>`;
   return `<div class="check ${cls}"><b class="badge">${badge} · ${k.until}'</b><span class="meta">score ${k.score.home}–${k.score.away}</span>
-    <p>${esc(x.label)}: <b>${esc(x.value ?? "n/a")}</b> from ${esc(x.n)} ${esc(x.unit)} in ${esc(x.window)} (${x.minutes} min). Target ${goal} ${esc(x.target)}.${moved}</p>
+    <p>${esc(x.label)}: <b>${esc(fmt(x.metric, x.value))}</b> from ${esc(x.n)} ${esc(x.unit)} in ${esc(x.window)} (${x.minutes} min). Target ${goal} ${esc(fmt(x.metric, x.target))}.${moved}</p>
     <p><b>Next</b> ${esc(next)}</p>
     <p class="meta"><b>Decision</b> ${esc(decided)}</p>
     ${guard}
@@ -1011,9 +1048,9 @@ function renderTv(cards, i) {
   if (c.type === "stat_bars") {
     body = `<div class="gfx panel"><h4>${esc(c.title)}</h4>` + c.rows.map((r) => {
       const tot = (r.home + r.away) || 1;
-      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home)}</span>
+      return `<div class="prow"><span class="lab">${esc(r.label)}</span><span>${esc(r.home_text ?? r.home)}</span>
         <span class="bar"><i style="flex:${r.home / tot};background:var(--home)"></i><i style="flex:${r.away / tot};background:var(--away)"></i></span>
-        <span class="r">${esc(r.away)}</span></div>`;
+        <span class="r">${esc(r.away_text ?? r.away)}</span></div>`;
     }).join("") + "</div>";
   } else if (c.type === "momentum") {
     const bars = c.series.map((s) => {
@@ -1082,7 +1119,7 @@ async function playEvents(d, evs, btn, feed) {
         $("scorebug").classList.remove("flash"); void $("scorebug").offsetWidth; $("scorebug").classList.add("flash");
       }
       if (interesting.has(e.type)) {
-        const extra = e.type === "shot" ? ` · xG ${e.xg} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${e.speed_kmh} km/h`
+        const extra = e.type === "shot" ? ` · xG ${fmt("xg", e.xg)} · ${String(e.outcome).replace("_", " ")}` : e.type === "sprint" ? ` · ${fmt("top_sprint_kmh", e.speed_kmh)}`
           : e.type === "goal" ? ` · ${e.score.home}-${e.score.away}` : "";
         feed.insertAdjacentHTML("afterbegin", `<div class="${e.type === "goal" ? "big" : ""}">${e.minute}' <span class="swatch" style="background:var(--${e.team === "away" ? "away" : "home"})"></span>${esc(e.player)} ${esc(e.type.toUpperCase())}${esc(extra)}</div>`);
       }

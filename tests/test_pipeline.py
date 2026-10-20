@@ -1056,3 +1056,201 @@ def test_best_when_travels_with_its_option(match):
     out = asyncio.run(half_time_briefing(match, client=client))
     assert _backends(out)["coach"] == "offline-rules"
     assert all(c["best_when"] for c in out["changes"])
+
+
+def test_display_rule():
+    d = metrics.display
+    assert d("pass_accuracy", 35 / 44) == "79.5%"
+    assert d("pass_accuracy", 0.789474) == "78.9%"
+    assert d("possession_pct", 52.35) == "52.4%"
+    assert d("xg", 0.125) == "0.13" and d("xg", 0.4) == "0.40"
+    assert d("xg", 0) == "0.00" and d("shots", 0) == "0"
+    assert d("xt_created", 1.165) == "1.165"
+    # A tiny positive value never looks like a measured zero.
+    assert d("xt_created", 0.0004) == "<0.001"
+    assert d("ppda", None) == "n/a"
+    assert d("top_sprint_kmh", 31.04) == "31.0 km/h"
+    assert d("shots", 4.25, kind="mean") == "4.3"
+    assert d("rate_min", 1.475) == "1.48/min"
+    assert d("unknown_key", 3.14159) == "3.14159"
+
+
+def test_page_formatter_matches_python():
+    import re
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    page = Path(__file__).parents[1].joinpath("static", "index.html")
+    src = re.search(
+        r"// fmt-start.*?// fmt-end", page.read_text(), re.S
+    ).group(0)
+    cases = [
+        ("pass_accuracy", 35 / 44, None),
+        ("pass_accuracy", 0.795, None),
+        ("pass_accuracy", None, None),
+        ("xg", 0.125, None),
+        ("xg", 1.005, None),
+        ("xg", 0, None),
+        ("xt_created", 0.0004, None),
+        ("xt_created", 1.1655, None),
+        ("possession_pct", 52.35, None),
+        ("shots", 4.25, "mean"),
+        ("turnovers_in_own_half", 1.475, "rate_10"),
+        ("rate_min", 0.845, None),
+        ("ppda", 7.25, None),
+        ("top_sprint_kmh", 33.35, None),
+    ]
+    script = (
+        src
+        + f"\nconst F = {json.dumps(metrics.formats())};"
+        + f"\nconst cases = {json.dumps(cases)};"
+        + "\nconsole.log(JSON.stringify(cases.map(([k, v, kind]) =>"
+        + " fmtWith(F, k, v, kind || undefined))));"
+    )
+    out = subprocess.run(
+        [node, "-e", script], capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        metrics.display(k, v, kind) for k, v, kind in cases
+    ]
+
+
+def test_player_card_splits_fouls_from_tackles(match):
+    ev = metrics.window(match["events"])
+    stats = {p["name"]: p for p in metrics.player_stats(ev, match).values()}
+    navarro = stats["Navarro"]
+    assert (
+        navarro["tackles"] + navarro["interceptions"],
+        navarro["fouls"],
+    ) == (
+        10,
+        1,
+    )
+    # The broad count PPDA relies on still includes the foul.
+    assert navarro["defensive_actions"] == 11
+    for p in stats.values():
+        assert p["defensive_actions"] == (
+            p["tackles"] + p["interceptions"] + p["fouls"]
+        )
+    assert stats["Haddad"]["pass_accuracy"] == pytest.approx(35 / 44, abs=1e-6)
+    # A synthetic foul counts as a foul, never as a tackle.
+    foul = dict(
+        next(e for e in ev if e["type"] == "foul"), player_id="H7", type="foul"
+    )
+    one = metrics.player_stats([foul], match)["H7"]
+    assert (one["fouls"], one["tackles"], one["interceptions"]) == (1, 0, 0)
+
+
+def test_player_totals_reconcile_with_team(match):
+    ev = metrics.window(match["events"])
+    stats = metrics.player_stats(ev, match).values()
+    for side in ("home", "away"):
+        team = metrics.team_summary(ev, side)
+        mine = [p for p in stats if p["team"] == side]
+        assert sum(p["shots"] for p in mine) == team["shots"]
+        # Rounded parts need not add exactly; allow half a unit each.
+        assert abs(sum(p["xg"] for p in mine) - team["xg"]) <= 0.005 * (
+            len(mine) + 1
+        )
+        assert abs(
+            sum(p["xt_created"] for p in mine) - team["xt_created"]
+        ) <= 0.0005 * (len(mine) + 1)
+
+
+def _card(match, name):
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            if c["name"] == name:
+                return c
+    raise KeyError(name)
+
+
+def test_insights_lead_by_role(match):
+    gk, st = _card(match, "Okafor"), _card(match, "Brennan")
+    assert gk["insight"].startswith("Okafor (GK) completed 17 of 20 passes")
+    assert "xG" not in gk["insight"]
+    assert st["insight"].startswith(
+        "Brennan (ST) recorded 1 shot worth 0.07 xG and 0 goals."
+    )
+    assert (
+        "Haddad (DM) completed 35 of 44 passes (79.5%)"
+        in (_card(match, "Haddad")["insight"])
+    )
+    assert _card(match, "Mensah")["insight"].startswith(
+        "Mensah (CB) made 3 tackles and 10 interceptions"
+    )
+    assert "xT" in _card(match, "Doyle")["insight"]  # full-back
+    assert "xT" in _card(match, "Navarro")["insight"]  # central midfield
+    assert "shot" in _card(match, "Silva")["insight"]  # winger
+    # A striker with no shots says so rather than inventing a verdict.
+    assert "recorded no shots" in _card(match, "Novak")["insight"]
+    # Every card speaks of recorded actions, not "work".
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            assert "recorded actions" in c["insight"]
+            assert "work" not in c["insight"]
+
+
+def test_insight_unknown_position_and_no_actions(match):
+    st = dict(_card(match, "Navarro")["stats"])
+    hm = _card(match, "Navarro")["heatmap"]
+    p = {"name": "Navarro", "position": "SW"}
+    text = metrics._player_insight(p, st, hm)
+    assert text.startswith("Navarro (SW) completed 26 of 35 passes")
+    empty = dict(hm, actions=0)
+    assert metrics._player_insight(p, st, empty) == (
+        "Navarro (SW) had no recorded actions in the first half."
+    )
+
+
+def test_insights_add_no_numbers(match):
+    import re
+
+    for side in ("home", "away"):
+        for c in metrics.player_cards(
+            metrics.window(match["events"]), match, side
+        ):
+            st, hm = c["stats"], c["heatmap"]
+            allowed = {
+                metrics.display(k, v)
+                for k, v in st.items()
+                if isinstance(v, int | float) and not isinstance(v, bool)
+            }
+            allowed |= {metrics.display("actions", hm["actions"])}
+            allowed |= {
+                metrics.display("share_pct", v)
+                for v in hm["thirds_pct"].values()
+            }
+            numbers = re.findall(r"\d+(?:\.\d+)?%?", c["insight"])
+            plain = {a.split(" ")[0] for a in allowed}
+            assert all(n in plain for n in numbers), (c["name"], numbers)
+
+
+def test_briefing_and_checks_carry_display_rules(match):
+    out = asyncio.run(half_time_briefing(match))
+    assert out["formats"] == metrics.formats()
+    press = out["findings"][0]
+    assert {e["metric"] for e in press["evidence"]} >= {"rate_min"}
+    bars = next(o for o in out["overlays"] if o["type"] == "stat_bars")
+    acc = {r["metric"]: r for r in bars["rows"]}
+    assert acc["xt_created"]["home_text"] == metrics.display(
+        "xt_created", out["summary"]["home"]["xt_created"]
+    )
+    check = asyncio.run(
+        second_half_check(
+            match, findings=out["findings"], changes=out["changes"]
+        )
+    )
+    threat = check["checks"][1]
+    assert threat["metric"] == "share_pct"
+    assert "61.0%" in check["verdicts"][1]["verdict"]
+    # Watch thresholds stay exactly as adopted.
+    assert threat["target"] == 40
