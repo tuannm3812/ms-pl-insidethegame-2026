@@ -2028,3 +2028,120 @@ offline metric/event probes, including all 22 seed-27 player cards and the
 fix or UI change was performed in this content pass. This is an append-only
 handoff for Claude; formatting and position-aware insights are not yet
 implemented. The user can continue their deeper review independently.
+
+## 2026-10-21 · Claude → Codex · Pass 9 and content audit: fixes and v3
+
+**Scope.** Mike chose "Fix all". I worked on Mike's Mac, on
+`claude/project-thread-093cml`. Codex's three entries were committed
+unchanged first (`9c89bc6`). Before changing anything I re-checked each
+finding against `f15e05e`. All held up, and I reproduced the backend
+ones offline:
+- opponent scoreline returned HTTP 500;
+- seed 5 home, all calls rejected: "Keep option A" with `next='keep'`;
+- adopted + in place with a null option returned 200 as option A;
+- Navarro's "Tackles + interceptions" was 10 + 1 foul;
+- Haddad 35/44 was stored as 0.80.
+
+**Correction to my own entry.** My 2026-10-21 entry said the verifier
+"never recommends switching". That overstated it: only the structured
+`next` field was enforced, and the prose was not checked. It still is
+not. The prompt asks the verifier not to recommend switching, and
+`check_verdicts` now allows `keep` only for an adopted target that is
+met. The page's advice line ("Next") is written in code from the status
+and decision. The verifier's prose is shown only under details, labelled
+as its wording. The README says the same.
+
+**Pass 9 (`3027529`).**
+1. `check_targets` takes the channel branch only for the threat
+   finding. A scoreline call naming the opponent is checked as xG.
+   There are tests through the API and through an accepted
+   ScriptedClient tactics reply.
+2. The verifier is decision-aware:
+   - adopting needs an option (422 otherwise);
+   - only adopted calls go to the verifier as chosen options;
+   - each check carries `adopted` and `implemented`;
+   - the decision record goes to both the model and rules verifiers;
+   - a call that was not adopted gets monitoring-only wording with no
+     option advice, and `next='review'`.
+
+   Tested on seed 5 home (threat met, 0.22 against at least 0.22) for
+   each of these records: rejected with no option, deferred with B, open
+   with A, and open with no option. Also tested: adopted but not
+   confirmed (keep allowed, `implemented` false); a model "keep" for a
+   call not adopted (rejected, falls back with the note); and the API 422.
+3. "Best when" is now part of the coach contract for each option
+   (`best_when`, `alternative_best_when`): in `check_changes`, the
+   prompt and grounding, and written per branch in `coach_offline`.
+   `rules_notes` no longer supplies it. A swapped-order regression
+   (options, costs and best-when swapped together through
+   ScriptedClient) keeps each one with its option. A coach reply without
+   best-when falls back to rules.
+4. Focus survives a redraw. Controls carry `data-key` and the focused
+   key is restored after rendering; "Discuss first" focuses that call's
+   heading. Checked with real key presses: Enter on option A, then two
+   Tabs, reaches Adopt; Enter then Tab reaches Defer.
+5. `compare.html`: narrow panes use `flex: none` with `80vh`. At
+   781 x 853 the frames are 682 px high (was 150).
+
+**Content audit (`a368a6d`, `9332995`).**
+- Player cards count tackles, interceptions and fouls separately.
+  `defensive_actions`, `DEFENSIVE_ACTIONS` and PPDA are unchanged.
+- One display registry in `halftime/metrics.py` (`display()`, half-up
+  via Decimal), applied with Codex's table. Counts are integers,
+  percentages one decimal, xG two, xT three, rates two with their unit,
+  PPDA one, speed one with km/h, and simulated means one. "<0.001" marks
+  a tiny positive value and "n/a" a missing one.
+- The page gets the same rules through `/api/match` and the briefing.
+  Its formatter matches Python on 14 cases, run under node in the test
+  suite.
+- Applied to the bars, team report, pre-match rows, evidence (items now
+  carry `metric`), player cards, follow-up, tooltips, feed, broadcast
+  stat bars (rows carry `metric` and display text), fan text and the
+  rules explainer.
+- Accuracy keeps full precision until shown: 35/44 shows 79.5%. Watch
+  thresholds are unchanged; the threat target is still 40.
+- The models get the same display strings (`display`), and grounding
+  also accepts half-up forms.
+- Role-led insights follow Codex's table (GK, CB, FB, DM, CM, winger,
+  ST, other), use "recorded actions" and only the card's numbers, with
+  no team ranking. Unknown positions, no actions and no shots are
+  handled honestly.
+- The v3 capture, with fonts blocked, found a phone-width overflow:
+  398 px at 375 and 390, because the longer pre-match values did not
+  wrap. Fixed in `9332995`.
+
+**Claude v3 (`bac4612`).** `docs/prototypes/versions/claude-v3/` is the
+app's own page at `9332995` with offline fixtures. The check is recorded
+per call and decision state and put together by `offline.js`. The folder
+has the five agreed screenshots, `capture.json`, notes and a manifest
+with hashes. The archive index and `compare.html` list v3, and the
+comparison opens on v2 beside v3. v1, v2 and codex-v1 are untouched;
+`git diff` against them is empty.
+
+**Verified.**
+- `ruff format --check .` and `ruff check .` pass (0.16.8). `pytest`:
+  80 passed.
+- `capture.py` in headless Chromium found no page errors and no
+  overflow at 1440, 1024, 900, 861, 768, 390 and 375 px. It also
+  recorded:
+  - keyboard focus kept after each step;
+  - the threat call, not adopted, reads "Monitoring only";
+  - Away's press check reads "Too close to call";
+  - a stale check is dropped.
+- Live model through uvicorn (Azure OpenAI from `.env`):
+  - Home briefing: tactics, explainer and coach all `OpenAIChatClient`,
+    with no rejection notes. The coach returned its own best-when for
+    each option.
+  - Check (press adopted and in place, threat rejected, scoreline
+    open): verifier `OpenAIChatClient`, accepted. All three `next` were
+    "review", and the threat verdict said monitoring only.
+  - The xG verdict again called 0.27 against 0.10 "close". That is
+    loose prose, which is why the page's advice comes from code.
+
+**Open.**
+- The evidence floors, the 40% limit and the cost check remain
+  proposals.
+- Decisions are not stored server-side.
+- The target id does not encode the match context.
+- Model-written evidence labels can repeat a unit the formatter adds.
+- Not merged or deployed.
